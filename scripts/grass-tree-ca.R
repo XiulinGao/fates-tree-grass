@@ -1,0 +1,153 @@
+#grass-tree-ca.R
+#this script is used to compare model simulations and obs about tree and grass
+#dynamics in CA, main focus is plant phys? 
+
+#load all necessary packages for reading and plotting netCDF files
+
+#library(readr)
+library(tidyverse)   #just load tidyverse for dplyr, stringr, and tidyr all at once
+library(ggplot2)
+#library(ggmap)
+#library(viridis)
+#library(weathermetrics)
+library(ncdf4) 
+#library(chron)
+library(RColorBrewer)
+#library(lattice)
+library(bigleaf)    #package for processing flux data
+library(lubridate)  #deal with time series 
+
+#load ggplot theme
+source("./ggplot-theme.R")
+
+#read in netcdf file 
+ftest7 <- nc_open("./data/fates_clm50_cali_test7_4pfts_test035_bb419bcc_e6cb1a72.fullrun.nc")
+
+#read in flux data, tower site lat: 38.4133 degrees_north, lon: 239.0492 degrees_east
+
+fluxobs <- read.csv("./data/AMF_US-Var_BASE_HH_16-5.csv", sep = ",", skip =2, #skip the first 2 rows
+                    stringsAsFactors = FALSE, na.strings = '-9999') #missing value is indicated by -9999 
+colnames(fluxobs) #variable names in flux obs, might just focus on NEE & GPP for now
+tail(fluxobs$TIMESTAMP_END, n=1) #end date of obs
+head(fluxobs$TIMESTAMP_START, n=1) #start date of obs, hmm, it's numeric not time, need to convert
+                                   # to time format so can calculate monthly mean for obs
+                                    #flux obs are available from 2000/01/01 to 2020/12/31
+
+
+#summary(ftest7)
+
+#sink(file = "ncdinfo.txt")
+#print(ftest7)
+#sink() #save output from print() to txt file so can open to read info about netcdf file 
+#read in the saved txt 
+ncdinfo <- read.delim("./ncdinfo.txt")
+varnames <- attributes(ftest7$var)$names #get all variable names in netCDF 
+
+#get ecosystem production related variables, search for GPP, NPP, NEP, and NEE in var names
+
+varnames[grep('GPP', varnames)] #GPP, GPP_CANOPY, GPP_UNDERSTORY
+varnames[grep('NPP', varnames)] #NPP, NPP_CROOT, NPP_FROOT, NPP_SEED, NPP_STEM, NPP_STOR
+varnames[grep('NEP', varnames)] #only NEP
+varnames[grep('NEE', varnames)] #no NEE found
+
+
+#extract gpp, npp, and nep from netcdf
+gpp <- ncvar_get(ftest7, varid = 'GPP')
+#dim(gpp) #dimension 14 22 1860 (lon, lat, time-step???)
+ncatt_get(ftest7, 'GPP') #unit: gC/m^2/s
+npp <- ncvar_get(ftest7, varid = 'NPP')
+#dim(npp)
+ncatt_get(ftest7, 'NPP') #same unit
+nep <- ncvar_get(ftest7, varid = 'NEP')
+#dim(nep)
+ncatt_get(ftest7, 'NEP') #same unit
+#get longitude and latitude
+lon <- ncvar_get(ftest7, "lon"); dim(lon); ncatt_get(ftest7, 'lon') #dimension and attributes
+lat <- ncvar_get(ftest7, "lat"); dim(lat); ncatt_get(ftest7, 'lat')
+ncatt_get(ftest7, 'time') #date since 1860-01-01
+tail(ncvar_get(ftest7, 'time'), n=1) #model simulation ends at 2014/12/31, 56575 (155yrs) days since 1860/01/01
+                                     # as there are 1860 obs, so each ob is a monthly mean
+                                      
+
+#filter out GPP, NEE and RECO (ecosystem respiration) from flux obs,
+#units for GPP, NEE and RECO are umol CO2/m^2/s, need to convert to gC
+
+ecoprod <- fluxobs %>% select(TIMESTAMP_START, TIMESTAMP_END, NEE_PI_F, GPP_PI_F, RECO_PI_F)
+
+#unit conversion from umolco2 to gC using bigleaf::umolCO2.to.gC/m^2/d
+ecoprod <- ecoprod %>% mutate(nee_flux = umolCO2.to.gC(NEE_PI_F),
+                              gpp_flux = umolCO2.to.gC(GPP_PI_F),
+                              reco_flux = umolCO2.to.gC(RECO_PI_F)) %>% 
+  select(-c(NEE_PI_F, GPP_PI_F, RECO_PI_F))
+
+#convert *_flux from gC/m^2/d to gC/m^2/s to be consistent with model simulation
+ecoprod <- ecoprod %>% mutate(nee_flux = nee_flux/86400,
+                              gpp_flux = gpp_flux/86400,
+                              reco_flux = reco_flux/86400)
+
+#convert time columns and subset 2000-2015 obs
+ecoprod <- ecoprod %>% mutate(time_start = ymd_hm(TIMESTAMP_START, tz='UTC'),
+                              time_end = ymd_hm(TIMESTAMP_END, tz = 'UTC')) %>%   
+  select(-c(TIMESTAMP_START, TIMESTAMP_END))
+
+#filter out obs between 2000-01-01 00:00 and 2016-01-01 00:00 to match model simulations
+ecoprod$time_interval <- interval(ecoprod$time_start, ecoprod$time_end)
+start <- ymd_hm(200001010000, tz = 'UTC')
+end <- ymd_hm(201501010000, tz = 'UTC')
+filter.interval <- interval(start, end)
+ecoprod <- ecoprod %>% filter(time_interval%within%filter.interval)
+
+#as model simulations are monthly means, so calculate monthly mean for flux obs
+ecoprod <- ecoprod %>% mutate(year = year(time_start), 
+                              month = month(time_start)) 
+#monthly mean
+month_flux <- ecoprod %>% group_by(year, month) %>% 
+  summarise_at(c("nee_flux", "gpp_flux", "reco_flux"),
+               mean, na.rm = TRUE)
+
+#get the GPP simulation closest to the flux tower site (38.4133, 239.0492),
+# so the closest grid cell is lat[13]:38.25, and lon[9]: 239.25, and also 
+# between 2000-01-01 and 2015-12-31
+gpp_slice <- gpp[9,13, 1681:1860] #subset model simulations 
+nep_slice <- nep[9,13, 1681:1860]
+
+#convert nep to nee
+nee_slice <- -nep_slice
+
+#combine model simulated nee and gpp to flux observed ones
+month_flux$gpp_mod <- gpp_slice
+month_flux$nee_mod <- nee_slice
+
+# plot model simulation against flux observations for gpp and nee
+#GPP
+ggplot(month_flux, aes(gpp_mod, gpp_flux)) + geom_point() +
+  geom_abline(slope =1, intercept = 0, size = 0.8) + 
+  labs(x = expression(Model~simulated~GPP~(gC~m^-2~s^-1)),
+       y = expression(Observed~GPP~(gC~m^-2~s^-1))) +
+  scale_x_continuous(labels = comma_format( decimal.mark = ".")) +
+  scale_y_continuous(labels = comma_format(decimal.mark = ".")) +
+  prestheme.nogridlines              #over estimated 
+
+ggsave("./gpp.png", width = col2, height= 0.7*col2, 
+units="cm", dpi = 800)
+
+#NEE
+ggplot(month_flux, aes(nee_mod, nee_flux)) + geom_point() +
+  geom_abline(slope =1, intercept = 0, size = 0.8) +
+  labs(x = expression(Model~simulated~NEE~(gC~m^-2~s^-1)),
+       y = expression(Observed~NEE~(gC~m^-2~s^-1))) + 
+  scale_x_continuous(labels = comma_format( decimal.mark = ".")) +
+  scale_y_continuous(labels = comma_format(decimal.mark = ".")) +
+  prestheme.nogridlines             #better predicted than GPP
+
+ggsave("./nee.png", width = col2, height = 0.7*col2, 
+       units = "cm", dpi = 800)
+
+
+#close connection to netcdf 
+nc_close(ftest7)
+
+#clean env.
+rm('fluxobs', 'ecoprod', 'gpp', 'nep', 'npp', 'varnames', 
+   'start', 'end', 'filter.interval', 'nep_slice')
+
