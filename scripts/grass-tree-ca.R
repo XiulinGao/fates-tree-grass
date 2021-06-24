@@ -21,11 +21,11 @@ library(lubridate)  #deal with time series
 source("./ggplot-theme.R")
 
 #read in netcdf file 
-ftest7 <- nc_open("./data/fates_clm50_cali_test7_4pfts_test035_bb419bcc_e6cb1a72.fullrun.nc")
+ftest7 <- nc_open("../data/fates_clm50_cali_test7_4pfts_test035_bb419bcc_e6cb1a72.fullrun.nc")
 
 #read in flux data, tower site lat: 38.4133 degrees_north, lon: 239.0492 degrees_east
 
-fluxobs <- read.csv("./data/AMF_US-Var_BASE_HH_16-5.csv", sep = ",", skip =2, #skip the first 2 rows
+fluxobs <- read.csv("../data/AMF_US-Var_BASE_HH_16-5.csv", sep = ",", skip =2, #skip the first 2 rows
                     stringsAsFactors = FALSE, na.strings = '-9999') #missing value is indicated by -9999 
 colnames(fluxobs) #variable names in flux obs, might just focus on NEE & GPP for now
 tail(fluxobs$TIMESTAMP_END, n=1) #end date of obs
@@ -40,7 +40,7 @@ head(fluxobs$TIMESTAMP_START, n=1) #start date of obs, hmm, it's numeric not tim
 #print(ftest7)
 #sink() #save output from print() to txt file so can open to read info about netcdf file 
 #read in the saved txt 
-ncdinfo <- read.delim("./ncdinfo.txt")
+ncdinfo <- read.delim("../ncdinfo.txt")
 varnames <- attributes(ftest7$var)$names #get all variable names in netCDF 
 
 #get ecosystem production related variables, search for GPP, NPP, NEP, and NEE in var names
@@ -143,6 +143,59 @@ ggplot(month_flux, aes(nee_mod, nee_flux)) + geom_point() +
 ggsave("./nee.png", width = col2, height = 0.7*col2, 
        units = "cm", dpi = 800)
 
+## seasonal cycle of GPP and NEE for both simulations and obs
+#first paste year + month to make a date column
+month_flux <- ungroup(month_flux)
+month_flux <- month_flux %>% mutate(date = (paste(month_flux$year, 
+                                                 month_flux$month, sep = '')))
+                                    
+month_flux$dates <- format(parse_date_time(month_flux$date, orders = c("Y/m")), "%Y-%m") 
+
+
+#as ggplot only works with date class, so convert dates to class date
+# with zoo::yearmon()
+
+month_flux $date <- zoo::as.yearmon(month_flux$dates)
+month_flux$date <- as.Date(month_flux$date)
+month_flux <- select(month_flux, -dates)
+
+ggplot(month_flux, aes(x = date)) + 
+  geom_line(aes(y = gpp_mod,color = "gpp_mod")) +
+  geom_line(aes(y = gpp_flux, color = "gpp_flux")) +
+  scale_y_continuous(labels = comma_format(decimal.mark = "."))+
+  scale_x_date(date_labels= "%Y-%m", date_breaks = '3 months',
+               limits = as.Date(c('2000-01-01', '2014-12-31')),
+               expand = expansion(0)) +
+  labs(x = 'Time', y = expression(GPP~(gC~m^-2~s^-1)))+
+  scale_colour_manual(breaks=c("gpp_mod", "gpp_flux"),
+                      values = c("black", "red")) +
+  prestheme.nogridlines +
+  theme(axis.text.x=element_text(angle=60, hjust=1, size = pressmsz-6),
+        legend.title = element_blank(), 
+        legend.position = "bottom")
+  
+ggsave("../results/seasonal-cycle-gpp.png", width = 1.7*col2,
+       height = col2, units = 'cm', dpi = 800)
+
+##time series plot for NEE
+
+ggplot(month_flux, aes(x = date)) + 
+  geom_line(aes(y = nee_mod,color = "nee_mod")) +
+  geom_line(aes(y = nee_flux, color = "nee_flux")) +
+  scale_y_continuous(labels = comma_format(decimal.mark = "."))+
+  scale_x_date(date_labels= "%Y-%m", date_breaks = '3 months',
+               limits = as.Date(c('2000-01-01', '2014-12-31')),
+               expand = expansion(0)) +
+  labs(x = 'Time', y = expression(NEE~(gC~m^-2~s^-1)))+
+  scale_colour_manual(breaks=c("nee_mod", "nee_flux"),
+                      values = c("black", "red")) +
+  prestheme.nogridlines +
+  theme(axis.text.x=element_text(angle=60, hjust=1, size = pressmsz-6),
+        legend.title = element_blank(), 
+        legend.position = "bottom")
+
+ggsave("../results/seasonal-cycle-nee.png", width = 1.7*col2,
+       height = col2, units = 'cm', dpi = 800)
 
 #close connection to netcdf 
 nc_close(ftest7)
