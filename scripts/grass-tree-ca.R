@@ -31,6 +31,61 @@ flux_var <- read.csv("../data/AMF_US-Var_BASE_HH_16-5.csv", sep = ",", skip =2, 
                     stringsAsFactors = FALSE, na.strings = '-9999') #missing value is indicated by -9999 
 flux_ton <- read.csv("../data/AMF_US-Ton_BASE_HH_13-5.csv", sep = ",", skip =2, #skip the first 2 rows
                      stringsAsFactors = FALSE, na.strings = '-9999')
+
+#read in biological measurements
+bio_var <- read.csv("../data/AMF_US-Var_BIF_20210331.csv", sep = ",", 
+                    stringsAsFactors = FALSE, na.strings = c('-9999', 'na', 'NA', ''))
+bio_ton <- read.csv("../data/AMF_US-Ton_BIF_20210331.csv", sep = ",", 
+                    stringsAsFactors = FALSE, na.strings = c('-9999', 'na', 'NA', ''))
+bio2_long <- rbind(bio_var, bio_ton)
+bio2_wide <- bio2_long %>% group_by(SITE_ID, GROUP_ID, VARIABLE_GROUP) %>% 
+  pivot_wider(names_from = VARIABLE, values_from = DATAVALUE)
+bio2_wide <- bio2_wide %>% select(c('SITE_ID', 'GROUP_ID', 'VARIABLE_GROUP',
+                                    'AG_BIOMASS_GRASS', 'AG_BIOMASS_GRASS_SPATIAL_VARIABILITY',
+                                    'AG_BIOMASS_GRASS_UNIT', 'AG_BIOMASS_DATE', 'LAI_DATE',
+                                    'LAI_TOT', 'LAI_TOT_SPATIAL_VARIABILITY', 'SWC', 'SWC_DATE',
+                                    'AG_BIOMASS_OTHER', 'AG_BIOMASS_OTHER_UNIT', 'AG_BIOMASS_TREE',
+                                    'AG_BIOMASS_TREE_UNIT', 'AG_LIT_PROD_TOT', 'AG_LIT_PROD_UNIT',
+                                    'LAI_U', 'LAI_U_SPATIAL_VARIABILITY'))
+bio2_wide <- bio2_wide %>% mutate_at(c('AG_BIOMASS_GRASS', 'AG_BIOMASS_GRASS_SPATIAL_VARIABILITY',
+                                       'LAI_TOT', 'LAI_TOT_SPATIAL_VARIABILITY', 'SWC',
+                                       'AG_BIOMASS_OTHER', 'AG_BIOMASS_TREE', 'LAI_U', 'LAI_U_SPATIAL_VARIABILITY',
+                                       'AG_LIT_PROD_TOT'),  list(~as.numeric(.)))
+bio2_wide <- ungroup(bio2_wide)
+
+# as obs are measured on diff date, might just have separate df for diff. avriable at each site 
+# then combine
+var_biomass <- bio2_wide %>% select('SITE_ID', 'AG_BIOMASS_DATE',
+                                    'AG_BIOMASS_GRASS') %>% 
+  mutate(DATE = ymd(AG_BIOMASS_DATE)) %>% filter(!is.na(AG_BIOMASS_GRASS))  %>% 
+  select(-AG_BIOMASS_DATE)
+var_biomass <- var_biomass %>%  mutate(year = year(DATE))
+#data.table::setnames(var_biomass, old = "AG_BIOMASS_GRASS", new = "measurement")
+#var_biomass$type <- "grass_ag"
+
+
+var_lai <- bio2_wide %>% select('SITE_ID', 'LAI_DATE', 'LAI_TOT') %>% 
+  mutate(DATE = ymd(LAI_DATE)) %>% filter(!is.na(LAI_TOT)) %>% select(-LAI_DATE)
+var_lai <- var_lai %>% mutate(year = year(DATE), month = month(DATE)) %>% 
+  group_by(year, month) %>% summarise(lai_var = mean(LAI_TOT, na.rm = TRUE))
+#data.table::setnames(var_lai, old = 'LAI_TOT', new = 'measurement')
+#var_lai$type <- 'lai_tot'
+
+#tonzi site does not have good biomass measurements, ignore biomass
+ton_lai <- bio2_wide %>% select('SITE_ID', 'LAI_DATE', 'LAI_U') %>% 
+  mutate(DATE = ymd(LAI_DATE)) %>% filter(!is.na(LAI_U)) %>% select(-LAI_DATE)
+ton_lai <- ton_lai %>% mutate(year = year(DATE), month = month(DATE)) %>% 
+  group_by(year, month) %>% summarise(lai_ton = mean(LAI_U, na.rm = TRUE))
+
+
+#laiobs <- rbind(var_lai, ton_lai)
+#laiobs <- laiobs %>% mutate(date = as.yearmon(paste(year, month, sep="-")))
+#laiobs <- laiobs %>% mutate(date = as.Date(date))
+#data.table::setnames(ton_lai, old = 'LAI_U', new = 'measurement')
+#ton_lai$type <- 'lai_u'
+#bioall_long <- rbind(var_biomass, var_lai, ton_lai)
+#bioall_wide <- pivot_wider(bioall_long, names_from = c(type, SITE_ID), values_from = measurement)
+
 ## select GPP, NEE, LE (latent heat), and H (sensible heat) and combine two flux datasets
 var <- flux_var %>% select(TIMESTAMP_START, TIMESTAMP_END, LE_PI_F, H_PI_F, NDVI, NEE_PI_F,
                            GPP_PI_F)
@@ -50,8 +105,8 @@ ton <- flux_ton %>% select(TIMESTAMP_START, TIMESTAMP_END, LE_PI_F_1_1_1, H_PI_F
 #sink() #save output from print() to txt file so can open to read info about netcdf file 
 #read in the saved txt 
 #ncdinfo <- read.delim("../ncdinfo.txt")
-varnames <- attributes(ftest7$var)$names #get all variable names in netCDF 
-dimnames <- attributes(ftest7$dim)$names
+#varnames <- attributes(ftest7$var)$names #get all variable names in netCDF 
+#dimnames <- attributes(ftest7$dim)$names
 
 ##get ecosystem production related variables, search for GPP, NPP, NEP, and NEE in var names
 
@@ -65,7 +120,7 @@ dimnames <- attributes(ftest7$dim)$names
 #varnames[grep('FSH', varnames)] #FSH? there are many sensible heat flux variables, difference???
 
 ## mortality variables
-varnames[grep('M', varnames)]  #M1-M10 (_SCLS (by size class) OR _SCPF (by pft/size class))
+#varnames[grep('M', varnames)]  #M1-M10 (_SCLS (by size class) OR _SCPF (by pft/size class))
 #M1: background mortality, M2: hydraulic mortality
 #M3: carbon starvation mortality, M4: impact mortality
 #M5: fire mortality, M6:termination mortality
@@ -77,24 +132,25 @@ varnames[grep('M', varnames)]  #M1-M10 (_SCLS (by size class) OR _SCPF (by pft/s
 #extract all variables from netcdf
 gpp <- ncvar_get(ftest7, varid = 'GPP')
 #dim(gpp) #dimension 14 22 1860 (lon, lat, time-step???)
-ncatt_get(ftest7, 'GPP') #unit: gC/m^2/s
+#ncatt_get(ftest7, 'GPP') #unit: gC/m^2/s
 npp <- ncvar_get(ftest7, varid = 'NPP')
 #dim(npp)
-ncatt_get(ftest7, 'NPP') #same unit
+#ncatt_get(ftest7, 'NPP') #same unit
 nep <- ncvar_get(ftest7, varid = 'NEP')
 #dim(nep)
-ncatt_get(ftest7, 'NEP') #same unit
+#ncatt_get(ftest7, 'NEP') #same unit
 lheat <- ncvar_get(ftest7, varid = 'EFLX_LH_TOT')  #W/m^2
 sheat <- ncvar_get(ftest7, varid = "FSH")
+lai <- ncvar_get(ftest7, varid = "ELAI")
 #mortality
 ## mortality should be in %, so averaged over number of plants per ha by pft/size (NPLANT_SCPF)
 bgloss <- ncvar_get(ftest7, varid = "M1_SCPF")
-dim(bgloss) # 4 dimensions: 14 (lat), 22 (lon), 39 (fates_levscpf), 1860 (month since 1860-01-01)
+#dim(bgloss) # 4 dimensions: 14 (lat), 22 (lon), 39 (fates_levscpf), 1860 (month since 1860-01-01)
 hydloss <- ncvar_get(ftest7, varid = "M2_SCPF")
 carbloss <- ncvar_get(ftest7, varid = "M3_SCPF")
 fireloss <- ncvar_get(ftest7, varid = "M5_SCPF")
 termloss <- ncvar_get(ftest7, varid = "M6_SCPF") #when >2 canopy layers, understory veg will be terminated
-#nplants <- ncvar_get(ftest7, varid = "NPLANT_SCPF")
+nplants <- ncvar_get(ftest7, varid = "NPLANT_SCPF")
 
 
 
@@ -156,20 +212,13 @@ month_flux <- fluxobs %>% group_by(year, month, site) %>%
 modelsims <- month_flux %>% filter(site =="var") %>%  select(year, month)
 modelsims$site <- "mod"
 
-modelsims$gpp <- gpp[9,13, 1681:1860] #subset model simulations 
+
+modelsims$gpp <- gpp[9,13, 1681:1860] #subset model simulations 2000-2014
 modelsims$nee <- -1* nep[9,13, 1681:1860]
 modelsims$le <- lheat[9, 13, 1681:1860]
 modelsims$h <- sheat[9, 13, 1681:1860]
+modelsims$lai <- lai[9, 13, 1681:1860]
 
-##1:39 are pft (1: pine, 2: cedar, 3: grass)*size (1:13 classes, 0-65cm)
-## 1:13~pine between 0-65cm; 14:26~cedar between 1-65; 27:39~grass between 1-65
-
-bgloss_slice <- bgloss[9,13,,1681:1860]
-hydloss_slice <- hydloss[9,13,,1681:1860]
-carbloss_slice <- carbloss[9,13,,1681:1860]
-fireloss_slice <- fireloss[9,13,,1681:1860]
-#termloss_slice <- termloss[9,13,,1681:1860]
-#nplants_slice <- nplants[9, 13,, 1681:1860]
 
 
 #combine model simulated nee and gpp to flux observed ones
@@ -177,7 +226,12 @@ fireloss_slice <- fireloss[9,13,,1681:1860]
 all_long <- rbind(month_flux, modelsims)
 all_wide <- pivot_wider(all_long, id_cols = c(year, month),
                         names_from = site, 
-                        values_from = c(nee, gpp, le, h, ndvi))
+                        values_from = c(nee, gpp, le, h, ndvi, lai)) 
+all_wide <- select(all_wide, -c(lai_var, lai_ton))
+#bind lai to all_wide
+all_wide <- left_join(all_wide, var_lai, by = c("year", "month"))
+all_wide <- left_join(all_wide, ton_lai, by = c("year", "month"))
+
 
 # plot model simulation against flux observations for gpp and nee
 #GPP
@@ -249,6 +303,24 @@ ggplot(all_wide, aes(x = h_mod)) +
         legend.position = "bottom")
 ggsave("../results/sh-comparison.png", width = col2, height = 0.7*col2, 
        units = "cm", dpi = 800)
+
+## LAI
+ggplot(all_wide, aes(x = lai_mod)) + 
+  geom_point(aes(y = lai_var, color = "lai_var")) +
+  geom_point(aes(y = lai_ton, color = "lai_ton")) +
+  geom_abline(slope =1, intercept = 0, size = 0.8) +
+  labs(x = expression(Model~simulated~LAI~(m^2~m^-2)),
+       y = expression(Observed~LAI~(m^2~m^-2))) + 
+  scale_x_continuous(labels = comma_format( decimal.mark = ".")) +
+  scale_y_continuous(labels = comma_format(decimal.mark = ".")) +
+  scale_color_manual(breaks = c("lai_var", "lai_ton"),
+                     values = c("black", "red")) +
+  prestheme.nogridlines +
+  theme(legend.title = element_blank(), 
+        legend.position = "bottom")
+ggsave("../results/lai-comparison.png", width = col2, height = 0.7*col2,
+       units = "cm", dpi = 800)
+
 ## seasonal cycle of GPP and NEE for both simulations and obs
 #first paste year + month to make a date column
 all_long <- ungroup(all_long)
@@ -343,7 +415,24 @@ ggplot(all_long, aes(date, h, color = site)) +
 ggsave("../results/seasonal-cycle-h.png", width = 1.7*col2,
        height = col2, units = 'cm', dpi = 800)
 
-
+##LAI cycle
+ggplot(all_wide, aes(date, lai_mod, color = 'lai_mod')) +
+  geom_line() +
+  geom_line(aes(y = lai_ton, color = 'lai_ton')) +
+  geom_line(aes(y = lai_var, color = 'lai_var')) +
+  scale_x_date(date_labels= "%Y-%m", date_breaks = '3 months',
+               limits = as.Date(c('2000-01-01', '2014-12-31')),
+               expand = expansion(0)) +
+  labs(x = 'Time', y = expression(LAI~(m^2~m^-2)))+
+  scale_colour_manual(breaks = c('lai_mod', 'lai_ton', 'lai_var'),
+    values = c("black", "red", "grey")) +
+  prestheme.nogridlines +
+  theme(axis.text.x=element_text(angle=60, hjust=1, size = pressmsz-6),
+        legend.title = element_blank(), 
+        legend.position = "bottom")
+ggsave("../results/seasonal-cycle-lai.png", width = 1.7*col2, 
+       height = col2, units = 'cm', dpi =800)
+  
 
 ######## what drives the seasonal cycle of GPP? ########
 
@@ -355,40 +444,62 @@ ggsave("../results/seasonal-cycle-h.png", width = 1.7*col2,
 ## are all obs for that variable, so need the transpose of the matrix first 
 ## so that each column is a variable then convert the matrix to 
 ## to data table (so in wide format), then combine all mortality to long data
+
+##1:39 are pft (1: pine, 2: cedar, 3: grass)*size (1:13 classes, 0-65cm)
+## 1:13~pine between 0-65cm; 14:26~cedar between 1-65; 27:39~grass between 1-65
+
+bgloss_slice <- bgloss[9,13,,1681:1860]
+hydloss_slice <- hydloss[9,13,,1681:1860]
+carbloss_slice <- carbloss[9,13,,1681:1860]
+fireloss_slice <- fireloss[9,13,,1681:1860]
+termloss_slice <- termloss[9,13,,1681:1860]
+nplants_slice <- nplants[9, 13,, 1681:1860]
+
 name_list <- c(sprintf("pine_scl%s", seq(1:13)), sprintf("cedar_scl%s", seq(1:13)),
                sprintf("grass_scl%s", seq(1:13)))
 
  
-#nplants_slice <- as.data.frame(t(carbloss_slice))
-#colnames(nplants_slice) <- name_list
+nplants_slice <- as.data.frame(t(nplants_slice))
+colnames(nplants_slice) <- name_list
 
 bgloss_slice <- as.data.frame(t(bgloss_slice))
 colnames(bgloss_slice) <- name_list
-bgloss_slice <- bgloss_slice/(86400*365)
-bgloss_slice $type <- "phen"
+bgloss_slice <- bgloss_slice/(nplants_slice*86400*365)
+bgloss_slice $type <- "bg"
 bgloss_slice $year <- all_wide$year
 bgloss_slice $month <- all_wide$month
 
 hydloss_slice <- as.data.frame(t(hydloss_slice))
 colnames(hydloss_slice) <- name_list
-hydloss_slice <- hydloss_slice/(86400*365)
+hydloss_slice <- hydloss_slice/(nplants_slice*86400*365)
 hydloss_slice$type <- "hydro"
 hydloss_slice$year <- all_wide$year
 hydloss_slice$month <- all_wide$month
 
 carbloss_slice <- as.data.frame(t(carbloss_slice))
 colnames(carbloss_slice) <- name_list
-carbloss_slice <- carbloss_slice/(86400*365)
+carbloss_slice <- carbloss_slice/(nplants_slice*86400*365)
 carbloss_slice$type <- "carb"
 carbloss_slice$year <- all_wide$year
 carbloss_slice$month <- all_wide$month
 
+fireloss_slice <- as.data.frame(t(fireloss_slice))
+colnames(fireloss_slice) <- name_list
+fireloss_slice <- fireloss_slice/(nplants_slice*86400*365)
+fireloss_slice$type <- "fire"
+fireloss_slice$year <- all_wide$year
+fireloss_slice$month <- all_wide$month
 
-
+termloss_slice <- as.data.frame(t(termloss_slice))
+colnames(termloss_slice) <- name_list
+termloss_slice <- termloss_slice/(nplants_slice*86400*365)
+termloss_slice$type <- "term"
+termloss_slice$year <- all_wide$year
+termloss_slice$month <- all_wide$month
 
 
 #combine all and convert to long data format
-death_wide <- rbind(bgloss_slice, hydloss_slice, carbloss_slice)
+death_wide <- rbind(bgloss_slice, hydloss_slice, carbloss_slice, fireloss_slice, termloss_slice)
 death_long <- pivot_longer(death_wide, cols = -c(year, month, type),
                            names_to = "pft_scl",
                            values_to = "mortality" )
@@ -414,8 +525,9 @@ ggplot(death_type, aes(date, mortality, color = type)) +
   scale_x_date(date_labels= "%Y-%m", date_breaks = '3 months',
                limits = as.Date(c('2000-01-01', '2014-12-31')),
                expand = expansion(0))+ 
-  labs(x = 'Time', y = expression(Mortality~(N~Ha^-1~s^-1)))+
-  scale_colour_manual(values = c("black", "red", "grey")) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = 'Time', y = expression(Mortality~(Year^-1))) +
+  scale_colour_manual(values = schwilkcolors) +
   prestheme.nogridlines +
   theme(axis.text.x=element_text(angle=60, hjust=1, size = pressmsz-6),
         legend.title = element_blank(), 
@@ -431,8 +543,9 @@ ggplot(death_pfttype, aes(date, mortality, color = type)) +
   scale_x_date(date_labels= "%Y-%m", date_breaks = '3 months',
                limits = as.Date(c('2000-01-01', '2014-12-31')),
                expand = expansion(0))+ 
-  labs(x = 'Time', y = expression(Mortality~(N~Ha^-1~s^-1)))+
-  scale_colour_manual(values = c("black", "red", "grey")) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = 'Time', y = expression(Mortality~(Year^-1)))+
+  scale_colour_manual(values = schwilkcolors) +
   prestheme.nogridlines +
   theme(axis.text.x=element_text(angle=60, hjust=1, size = pressmsz-6),
         legend.title = element_blank(), 
@@ -443,27 +556,27 @@ ggsave("../results/seasonal-cycle-deathby-pftype.png", width = 1.7*col2,
 ### it's mainly driven by grasses dying as both hydro failure and carbon starvation???
 
 ## plot hydro failure and carbon starvation mortality over gpp
-ggplot(all_wide, aes(date)) +
-  geom_line(aes(y = gpp_mod, color = "gpp_mod"))+
-  geom_line(aes(y = gpp_var, color = "gpp_var")) +
-  geom_line(aes(y = gpp_ton, color = "gpp_ton"))+
-  geom_line(aes(y = death_typewide$hydro, color = "hydro_fail")) +
-  geom_line(aes(y = death_typewide$carb, color = "carb_starv")) +
-  #geom_line(y = death_typewide$phen, color = "black")+
-  scale_x_date(date_labels= "%Y-%m", date_breaks = '3 months',
-               limits = as.Date(c('2000-01-01', '2014-12-31')),
-               expand = expansion(0)) +
-xlab("Time") + ylab("") + 
- scale_colour_manual(breaks = c("gpp_mod", "gpp_var", "gpp_ton", 
-                                "hydro_fail", "carb_starv"),
-    values = schwilkcolors) +
-  prestheme.nogridlines +
-  theme(axis.text.x=element_text(angle=60, hjust=1, size = pressmsz-6),
-        legend.title = element_blank(), 
-        legend.position = "bottom")
+#ggplot(all_wide, aes(date)) +
+  #geom_line(aes(y = gpp_mod, color = "gpp_mod"))+
+  #geom_line(aes(y = gpp_var, color = "gpp_var")) +
+  #geom_line(aes(y = gpp_ton, color = "gpp_ton"))+
+  #geom_line(aes(y = death_typewide$hydro, color = "hydro_fail")) +
+  #geom_line(aes(y = death_typewide$carb, color = "carb_starv")) +
+  #geom_line(aes(y = death_typewide$fire, color = "fire"))+
+  #geom_line(aes(y = death_typewide$bg, color = "bg"))+
+  #scale_x_date(date_labels= "%Y-%m", date_breaks = '3 months',
+               #limits = as.Date(c('2000-01-01', '2014-12-31')),
+               #expand = expansion(0)) +
+#xlab("Time") + ylab("") + 
+ #scale_colour_manual(breaks = c("gpp_mod", "hydro_fail", "carb_starv",
+                                #"fire", "bg"), values = schwilkcolors) +
+  #prestheme.nogridlines +
+  #theme(axis.text.x=element_text(angle=60, hjust=1, size = pressmsz-6),
+        #legend.title = element_blank(), 
+        #legend.position = "bottom")
 
-ggsave("../results/all-gpp-death.png", width = 1.7*col2,
-       height = col2, units = 'cm', dpi = 800)
+#ggsave("../results/all-gpp-death.png", width = 1.7*col2,
+       #height = col2, units = 'cm', dpi = 800)
 
 ##both hydraulic failure and carbon starvation can be causes, but which one
 ## is more important?
@@ -479,28 +592,28 @@ model_data <- all_wide %>% left_join(death_pfttype_wide, by = "date") %>%
   left_join(death_typewide, by = "date")
 
 cordt <- model_data %>% select(grass_hydro, grass_carb, cedar_hydro,
-                               cedar_carb, pine_phen, cedar_phen, carb, 
-                               hydro, phen)
+                               cedar_carb, cedar_fire, pine_hydro, pine_carb, 
+                               pine_fire,hydro, carb, fire)
 corr <- cor(cordt)
-#ggcorrplot::ggcorrplot(corr)
-#pairs(cordt, pch = 19, lower.panel = NULL)
-#ggsave("../results/correlation.png", dpi = 800)
+ggcorrplot::ggcorrplot(corr)
+ggsave("../results/correlation.png", dpi = 800)
+pairs(cordt, pch = 19, lower.panel = NULL)
 
 zscore <- function(x) (x - mean(x, na.rm=TRUE)) / sd(x, na.rm = TRUE) 
 
-model_data <- model_data %>% mutate_at(c("grass_hydro", "grass_carb", "cedar_hydro", 
-                                         "cedar_carb", "pine_phen", "cedar_phen",
-                                         "carb", "hydro", "phen"),
+model_data <- model_data %>% mutate_at(c("grass_hydro", "grass_carb", "cedar_hydro", "cedar_fire",
+                                         "cedar_carb", "pine_hydro", "pine_carb", "pine_fire",
+                                         "carb", "hydro", "fire", "lai_mod"),
                                list(s = zscore))
 model_data <- model_data %>% mutate(gpp_mod_log = log10(gpp_mod))
 
 
 ## plot mortaliry against gpp to explore the relationship then do model
-ggplot(model_data, aes(phen, gpp_mod)) +
+ggplot(model_data, aes(hydro, gpp_mod)) +
   geom_point() +
   scale_y_continuous("Log (GPP)",
     trans = "log10") +
-  xlab(expression(Phenology~mortality~(N~Ha^-1~s^-1))) +
+  xlab(expression(Hydraulic~mortality~(Year^-1))) +
   prestheme.nogridlines
 ggsave("../results/gpp-phen.png", dpi = 800, width = col2, 
        height = 0.8*col2, units = "cm") #b/c phen is negatively correlated to carb?
@@ -510,12 +623,13 @@ ggsave("../results/gpp-phen.png", dpi = 800, width = col2,
 
 
 ## model
-gpp.lm1 <- lm(gpp_mod_log ~ carb_s*hydro_s*phen_s, data = model_data)
+gpp.lm1 <- lm(gpp_mod_log ~ carb_s + hydro_s+fire_s + lai_mod_s, data = model_data)
 summary(gpp.lm1)
 plot(gpp.lm1)
 car::Anova(gpp.lm1)
 
-gpp.lm2 <- lm(gpp_mod_log ~ grass_carb_s*grass_hydro_s*cedar_hydro_s, 
+gpp.lm2 <- lm(gpp_mod_log ~ grass_carb_s + grass_hydro_s + cedar_hydro_s +
+                cedar_fire_s + pine_fire_s + pine_carb_s + lai_mod_s, 
               data = model_data)
 summary(gpp.lm2)
 plot(gpp.lm2)
@@ -523,6 +637,30 @@ car::Anova(gpp.lm2)
 
 ##close connection to netcdf 
 nc_close(ftest7)
+
+## plot function from 
+## https://sites.google.com/view/climate-access-cooperative/code?authuser=0
+
+mapCDFtemp <- function(lat,lon,tas){ #model and perc should be a string
+  
+  titletext <- "title"
+  expand.grid(lon, lat) %>%
+    rename(lon = Var1, lat = Var2) %>%
+    mutate(lon = ifelse(lon > 180, -(360 - lon), lon),
+           tas = as.vector(tas)) %>% 
+    
+    #mutate(tas = convert_temperature(tas, "k", "c")) %>%
+    
+    ggplot() + 
+    geom_point(aes(x = lon, y = lat, color = tas),
+               size = 0.8) + 
+    borders(database="state", regions = "california", colour="black", fill=NA) + 
+    scale_color_viridis(na.value="white",name = "Temperature") + 
+    theme(legend.direction="vertical", legend.position="right", legend.key.width=unit(0.4,"cm"), legend.key.heigh=unit(2,"cm")) + 
+    coord_quickmap() + 
+    ggtitle(titletext) 
+}
+
 
 #clean env.
 rm('fluxobs', 'ecoprod', 'gpp', 'nep', 'npp', 'varnames', 
