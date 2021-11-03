@@ -1,0 +1,1540 @@
+---
+title: "California statewide simulation results"
+author: "Xiulin Gao"
+date:   "2021-11-01"
+output:
+html_document:
+df_print: paged
+---
+
+
+```{r, label = 'case-settings'}
+case_name  = "cali-c3grass_CLM_FATES"
+case_label = "California C3 grass 410ppm"
+num.label  = c(1L)
+case_num   = sprintf("case%s",num.label)
+case_desc  = "California C3 annual grass(CLM-FATES)"
+hlm_color  = "#E69F00"
+tstampa    = NA_character_
+tstampz    = NA_character_
+
+```
+
+
+
+
+```{r, label = 'path-settings'}
+home_path  = path.expand("~")
+hesm_main  = file.path(home_path,"Documents/FATES/SimulationOutputs")
+site_main  = file.path(hesm_main, "tower-obs_2000-2020")
+util_path  = file.path(home_path,"FATES_Utils/RUtils")
+plot_main  = file.path(hesm_main,"figures",case_name)
+
+```
+
+
+
+```{r, label='tower-information'}
+site_name = "1x1pt-US-Var_v15-5_c20211026"
+nsite     = length(site_name) #when comparison done for multiple sites, to-do 
+```
+
+
+
+```{r, label = 'set-pfts', messgae=FALSE, results='hide'}
+user_pftinfo = TRUE
+pftinfo      = list()
+n            = 0
+n            = n + 1
+pftinfo[[n]] = list( id     = 1
+                   , key    = "pft1"
+                   , short  = "C3 grass"
+                   , desc   = "Cool season C3 annual grass"
+                   , colour = "#00BFC4"
+                   )#end list
+# n          = n + 1
+# add more pft info here. set user_pftinfo to FALSE if there are too many PFTs, which is not feasible 
+
+```
+
+
+
+```{r, label='plot-settings', message=FALSE, results='hide'}
+
+gg_device = c("pdf")
+gg_depth  = 600
+gg_ptsz   = 18
+gg_ptszl  = 24
+gg_widthl = 22.5
+gg_heightl= 18
+gg_width  = 14.5
+gg_height = 8.5
+gg_units  = 'in'
+gg_screen = TRUE
+gg_tfmt   = '%y'
+n_device  = length(gg_device)
+
+# set model and site color
+hlm_colour  = c("#E69F00", "#56B4E9", "#CC79A7","#F0E442", "#0000FF", "#00B286", "#8F9900", "#997000") 
+site_colour  = "#000000"
+
+```
+
+
+
+
+```{r,label='seasonal-variability'}
+# Define lower and upper bound for interannual variability ribbon around the mean.
+sdev_ribbon  = 1.                  # Standard-deviation equivalent for ribbon 
+qlwr_ribbon  = pnorm(-sdev_ribbon) # Lower quantile for ribbon
+qupr_ribbon  = pnorm(+sdev_ribbon) # Lower quantile for ribbon
+alpha_ribbon = 0.2                 # Transparency for ribbon
+
+```
+
+
+
+
+```{r, label='load-everything', message=FALSE, results='hide'}
+source(file.path(util_path,"load.everything.r"),chdir=TRUE)
+```
+
+
+
+```{r, label='set-derived-path',message=FALSE,results='hide'}
+case_path  = file.path(hesm_main, case_name)
+ncase      = length(case_name)
+cnames     = case_label
+simul_path = file.path(case_path, "hist")
+
+state_path          = file.path(plot_main,"statewide_var")
+tstheme_path        = file.path(plot_main,"tseries_theme")
+tsage_path          = file.path(plot_main,"tseries_age"  )
+tsdbh_path          = file.path(plot_main,"tseries_dbh"  )
+tspft_path          = file.path(plot_main,"tseries_pft"  )
+secy_path           = file.path(plot_main,"secycle"      )
+comparison_path     = file.path(plot_main,"comparison"   )
+
+dummy = dir.create(state_path         , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tstheme_path       , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsage_path         , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tsdbh_path         , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(tspft_path         , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(secy_path          , recursive = TRUE, showWarnings = FALSE)
+dummy = dir.create(comparison_path    , recursive = TRUE, showWarnings = FALSE)
+
+# Define eddy covariance tower file and MODIS LAI summaries
+site_path  = file.path(site_main,site_name                         )
+site_base  = list.files(path=site_path,pattern="_eddy-summ\\.nc$"  )
+lai_base   = list.files(path=site_path,pattern="tseries_lai\\.csv$")
+#lai_path   = file.path(site_path,laiem_base                        )
+
+#    Make sure we found the tower file, otherwise, stop. In case more than one file exists, 
+#    we take the most recent one. 
+if (length(site_base) > 0 && length(lai_base)>0){
+   site_file = file.path(site_path,site_base)
+   site_info = file.info(site_file)
+   iuse      = which.max(as.POSIXct(site_info$mtime))
+   site_base = site_base[iuse]
+   site_file = site_file[iuse]
+   lai_file  = file.path(site_path,lai_base)
+   lai_info  = file.info(lai_file)
+   iuse      = which.max(as.POSIXct(lai_info$mtime))
+   lai_base  = lai_base[iuse]
+}else{
+   cat(" Tower file or LAI data not found.  Check your settings.\n")
+   cat(" site_main = \"",site_main,"\"\n",sep="")
+   cat(" site_name = \"",site_name,"\"\n",sep="")
+   cat(" site_path = \"",site_path,"\"\n",sep="")
+   cat(" Path \"site_main\" exists = ",file.exists(site_main),"\n",sep="")
+   cat(" Path \"site_path\" exists = ",file.exists(site_path),"\n",sep="")
+   stop(" Path settings for site data are likely incorrect.")
+}
+```
+
+
+
+```{r,label='find-files',message=FALSE,results='hide'}
+
+cat(" + Search FATES outputs. ")
+
+hlm_midfix = "clm2.h0"
+nc_prefix  = paste0(rep(case_name, each = length(hlm_midfix)), ".", hlm_midfix)
+nc_base    = paste0(nc_prefix, "\\.....-..\\.nc")
+nc_file    = file.path( rep(x = simul_path, each = length(hlm_midfix))
+                      , rep(x = nc_base, time = length(simul_path))
+                      )
+nc_file    = unique(nc_file)
+
+nc_success = FALSE
+n = 0
+nc_zero = list()
+for (d in seq_along(nc_file)){
+   nc_path = dirname(nc_file[d])
+   nc_base = basename(nc_file[d])
+   nc_list = list.files(path=nc_path,pattern=nc_base)
+   if (length(nc_list) > 0){
+      nc_success = TRUE
+      n =  n+1
+
+      nc_nfile = length(nc_list)
+      nc_nchar = nchar(nc_list[1])
+
+      nc_year   = as.numeric(substring(nc_list,nc_nchar-9,nc_nchar-6))
+      nc_month  = as.numeric(substring(nc_list,nc_nchar-4,nc_nchar-3))
+      nc_tstamp = make_datetime(year=nc_year,month=nc_month)
+
+      i1st       = which.min(nc_tstamp)
+      ilst       = which.max(nc_tstamp)
+      nc_t1st    = nc_tstamp[i1st]
+      nc_tlst    = nc_tstamp[ilst]
+      tstamp_1st = sprintf("%2.2i/%2.2i/%4.4i",month(nc_t1st),day(nc_t1st),year(nc_t1st))
+      tstamp_lst = sprintf("%2.2i/%2.2i/%4.4i",month(nc_tlst),day(nc_tlst),year(nc_tlst))
+
+      simul_path[n] = nc_path
+      nc_zero[n]    = file.path(simul_path[n],nc_list[1])
+      sel_midfix = mapply(FUN=grepl,pattern=as.list(hlm_midfix),MoreArgs=list(x=nc_base))
+      hlm_midfix = hlm_midfix[sel_midfix]
+   }#end if (length(nc_list) > 0)
+   nc_zero = unlist(nc_zero)
+}#end for (d in seq_along(nc_file))
+cat(nc_success)
+if(length(nc_zero)==ncase){cat("Find the 1st output for all cases")}else{
+   cat("There's an error finding 1st output for all cases")}
+
+
+```
+
+
+```{r,label='dimension-settings',message=FALSE,results='hide'}
+
+# longitude and latitude
+nc1_now     = nc_open(nc_zero[1])
+lon         = ncvar_get(nc1_now, "lon")
+lat         = ncvar_get(nc1_now, "lat")
+nlon        = dim(lon)
+nlat        = dim(lat)
+lons        = rep(lon, time=nlat) #when flat variable by lon and lat dimension it reads along longitude axis first 
+lats        = rep(lat, each=nlon)
+locakeys    = paste(lons, lats, sep=',')
+nlo         = length(locakeys)
+dsoi        = nc1_now$var$ZSOI$varsize  #soil layer variables dimension
+dummy       = nc_close(nc1_now)
+
+# time
+if (! "tstamp0" %in% ls()){
+   tstamp0 = as.integer(unlist(strsplit(tstamp_1st,split="/")))
+   year0   = tstamp0[3]
+   month0  = tstamp0[1]
+}#end if (is.character(tstampa))
+if (is.na(tstampa)){
+   tstampa = as.integer(unlist(strsplit(tstamp_1st,split="/")))
+   yeara   = tstampa[3]
+   montha  = tstampa[1]
+}else if (is.character(tstampa)){
+   tstampa = as.integer(unlist(strsplit(tstampa,split="/")))
+   yeara   = tstampa[3]
+   montha  = tstampa[1]
+}#end if (is.character(tstampa))
+if (is.character(tstampz)){
+   tstampz = as.integer(unlist(strsplit(tstamp_lst,split="/")))
+   yearz   = tstampz[3]
+   monthz  = tstampz[1]
+}else if (is.character(tstampz)){
+   tstampz = as.integer(unlist(strsplit(tstampz,split="/")))
+   yearz   = tstampz[3]
+   monthz  = tstampz[1]
+}#end if (is.character(tstampz))
+
+nmontha   = 12 - montha + 1          # Number of months in yeara
+nmidyears = max(0,yearz - yeara - 1) # Number of years in between yeara and yearz
+nmonthz   = monthz                   # Number of months in yearz
+
+# Create lubridate object for initial and final time
+tstampa = make_datetime( year=yeara,month=montha,day=1L)
+tstampz = make_datetime( year=yearz,month=monthz,day=1L)
+
+# Create month and year vector
+if (yeara == yearz){
+   # Simulation did not last more than one year
+   tmonth = seq(from=montha,to=monthz,by=1)
+   tyear  = rep(x=yeara,times=length(tmonth))
+}else{
+   # Simulation lasted longer than a year.
+   tmonth = c( seq(from=montha,to=12,by=1)
+             , rep(sequence(12),times=nmidyears)
+             , seq(from=1     ,to=monthz,by=1)
+             )#end c
+   tyear  = c( rep(yeara,each=nmontha)
+             , rep(yeara+sequence(nmidyears),each=12)
+             , rep(yearz,each=nmonthz)
+             )#end c
+}#end if (yeara == yearz)
+
+# Create time stamp and find how many times should be processed.
+tstamp = make_datetime(year=tyear,month=tmonth,day=1L)
+ntstamp = length(tstamp)
+
+
+```
+
+
+
+
+```{r, label='variable-info',message=FALSE,results='hide'}
+if ("nc_conn" %in% ls()){dummy = nc_close(nc_conn); rm(nc_conn)}
+
+nc_dlist <- list()
+nc_vlist <- list()
+nc_conns <- sprintf("nc_conn%s", cnames)
+for (n in seq(ncase)) {
+nc_conn  = nc_open(filename=nc_zero[n])
+nc_nvars = nc_conn$nvars
+nc_ndims = nc_conn$ndims
+nc_dlist[[n]] = rep(NA_character_,times=nc_ndims)
+nc_vlist[[n]] = rep(NA_character_,times=nc_nvars)
+for (d in sequence(nc_ndims)) nc_dlist[[n]][d] = nc_conn$dim[[d]]$name
+for (v in sequence(nc_nvars)) nc_vlist[[n]][v] = nc_conn$var[[v]]$name
+assign(nc_conns[n], nc_conn)
+}
+
+idxage   = match("fates_levage",nc_dlist[[1]])
+if (is.finite(idxage)){
+   ages     = nc_conn$dim[[idxage]]$vals
+   nages    = nc_conn$dim[[idxage]]$len
+   agekeys  = sprintf("age_%3.3i",ages)
+   agelabs  = c( paste0("paste(",ages[-nages],"-",ages[-1],")")
+               , paste0("paste(",ages[nages],"-infinity)")
+               )#end c
+   agelabs  = parse(text=agelabs)
+}else{
+   ages     = numeric(0L)
+   nages    = 0L
+   agekeys  = character(0L)
+   agelabs  = character(0L)
+}#end if (is.na(idxage))
+
+
+# List of size classes
+idxdbh   = match("fates_levscls",nc_dlist[[1]])
+if (is.finite(idxdbh)){
+   dbhs     = nc_conn$dim[[idxdbh]]$vals
+   ndbhs    = nc_conn$dim[[idxdbh]]$len
+   dbhkeys  = sprintf("dbh_%3.3i",dbhs)
+   dbhlabs  = c( paste0("paste(",dbhs[-ndbhs],"-",dbhs[-1],")")
+               , paste0("paste(",dbhs[ndbhs],"-infinity)")
+               )#end dbhlabs
+   dbhlabs  = parse(text=dbhlabs)
+}else{
+   dbhs    = numeric(0L)
+   ndbhs   = 0L
+   dbhkeys = character(0L)
+   dbhlabs = character(0L)
+}#end if (is.finite(idxdbh))
+
+# List of PFT classes (only if not using user-defined classes).
+idxpft   = match("fates_levpft",nc_dlist[[1]])
+if (! is.finite(idxpft)){
+   # PFT index not found. Skip PFTs altogether.
+   pftinfo = tibble( id               = numeric(0L)
+                   , key              = character(0L)
+                   , short            = character(0L)
+                   , desc             = character(0L)
+                   , colour           = character(0L)
+                   , stringsAsFactors = FALSE
+                   )#end data.table
+}else if (! user_pftinfo){
+   # Select all PFTs available
+   pftids  = nc_conn$dim[[idxpft]]$vals
+   npftids = nc_conn$dim[[idxpft]]$len
+
+   # Build tibble with all the PFTs.
+   pftinfo = tibble( id               = pftids
+                   , key              = sprintf("pft%2.2i" ,pftids)
+                   , short            = sprintf("PFT%2.2i" ,pftids)
+                   , desc             = sprintf("PFT %2.2i",pftids)
+                   , colour           = brewer.pal(n=npftids,name="PuBuGn")
+                   , stringsAsFactors = FALSE
+                   )#end tibble
+}else if (! is_tibble(pftinfo)){
+   # Convert user-defined pftinfo to a "tibble" object
+   pftinfo  = do.call(what=rbind,args=lapply(X=pftinfo,FUN=as_tibble,stringsAsFactors=FALSE))
+}#end if (! is.finite(idxpft))
+
+# Set number of PFTs (active PFTs only) 
+npfts = nrow(pftinfo)
+
+# List of soil layer
+idxsoi   = match("levgrnd",nc_dlist[[1]])
+if (is.finite(idxsoi)){
+   sois     = nc_conn$dim[[idxsoi]]$vals
+   nsois    = nc_conn$dim[[idxsoi]]$len
+   soikeys  = sprintf("sl_%3.3f",sois)
+   soilabs  = c( paste0("paste(",sois[-nsois],"-",sois[-1],")")
+               , paste0("paste(",sois[nsois],"-infinity)")
+               )#end dbhlabs
+   soilabs  = parse(text=soilabs)
+}else{
+   sois    = numeric(0L)
+   nsois   = 0L
+   soikeys = character(0L)
+   soilabs = character(0L)
+}#end if (is.finite(idxdbh))
+
+# retrieve variables by age
+nc_byage = nc_vlist[[1]][grepl(pattern="_BY_AGE$",x=nc_vlist[[1]])]
+nc_pref  = tolower(gsub(pattern="_BY_AGE$",replacement="",x=nc_byage))
+nc_keep  = nc_pref %in% fatesvar$vnam & (! duplicated(nc_pref))
+no_byage = nc_byage[! nc_keep]
+nc_byage = nc_byage[  nc_keep]
+nbyage   = length(nc_byage)
+
+# by size class and see if total LAI can be caiculated
+is_size   = grepl(pattern="_SCLS$",x=nc_vlist[[1]]) | grepl(pattern="_SCPF$",x=nc_vlist[[1]])
+nc_bydbh  = nc_vlist[[1]][is_size]
+nc_pref   = gsub(pattern="_SCLS$",replacement="",x=nc_bydbh)
+nc_pref   = gsub(pattern="_SCPF$",replacement="",x=nc_pref )
+nc_pref   = tolower(nc_pref)
+nc_keep   = (nc_pref %in% fatesvar$vnam) & (! duplicated(nc_pref))
+no_bydbh  = nc_bydbh[! nc_keep]
+nc_bydbh  = unique(nc_bydbh[  nc_keep])
+if (  all(c("LAI_UNDERSTORY_SCLS","LAI_CANOPY_SCLS") %in% nc_bydbh)
+   && (! "LAI_SCLS" %in% nc_bydbh) ){
+   nc_bydbh    = unique(c(nc_bydbh,"LAI_SCLS"))
+   laidbh_last = TRUE
+}else if (  all(c("LAI_UNDERSTORY_SCPF","LAI_CANOPY_SCPF") %in% nc_bydbh)
+   && (! "LAI_SCPF" %in% nc_bydbh) ){
+   nc_bydbh    = unique(c(nc_bydbh,"LAI_SCPF"))
+   laidbh_last = TRUE
+}else{
+   laidbh_last = FALSE
+}#end if (  all(c("LAI_UNDERSTORY_SCLS","LAI_CANOPY_SCLS") %in% nc_bydbh)
+nbydbh    = length(nc_bydbh)
+
+
+# by PFT 
+
+is_pft    = grepl(pattern="_SCPF$",x=nc_vlist[[1]])
+nc_bypft  = nc_vlist[[1]][is_pft]
+nc_pref   = tolower(gsub(pattern="_SCPF$",replacement="",x=nc_bypft ))
+nc_keep   = nc_pref %in% fatesvar$vnam & (! duplicated(nc_pref))
+no_bypft  = nc_bypft[! nc_keep]
+nc_bypft  = unique(nc_bypft[  nc_keep])
+if (  all(c("LAI_UNDERSTORY_SCPF","LAI_CANOPY_SCPF") %in% nc_bypft)
+   && (! "LAI_SCPF" %in% nc_bypft) ){
+   nc_bypft    = unique(c(nc_bypft,"LAI_SCPF"))
+   laipft_last = TRUE
+}else{
+   laipft_last = FALSE
+}#end if (  all(c("LAI_UNDERSTORY_SCPF","LAI_CANOPY_SCPF") %in% nc_bypft)
+nbypft    = length(nc_bypft)
+
+
+# all 1D and 2D variables available at the host model
+nc_pref   = tolower(x=nc_vlist[[1]])
+nc1d_keep = nc_pref %in% hlm1dvar$vnam
+no_hlm1d  = nc_vlist[[1]][! nc1d_keep]
+nc_hlm1d  = nc_vlist[[1]][  nc1d_keep]
+nc2d_keep = nc_pref %in% hlm2dvar$vnam
+no_hlm2d  = nc_vlist[[1]][! nc2d_keep]
+nc_hlm2d  = nc_vlist[[1]][  nc2d_keep]
+
+# Check whether to append "evapotranspiration"
+if (  ( all(c("QSOIL","QVEGT","QVEGE") %in% nc_hlm1d) ) && (! "QEVTR" %in% nc_hlm1d) ){
+   nc_hlm1d = unique(c(nc_hlm1d,"QEVTR"))
+   etr_last = TRUE
+}else{
+   etr_last = FALSE
+}#end if (  ( all(c("QSOIL","QVEGT","QVEGE") %in% nc_hlm1d) ) && (! "QEVTR" %in% nc_hlm1d) )
+
+# Check whether to append ecosystem respiration
+if (  ( all(c("AR","HR") %in% nc_hlm1d) ) && (! "ER" %in% nc_hlm1d) ){
+   nc_hlm1d = unique(c(nc_hlm1d,"ER"))
+   er_last  = TRUE
+}else{
+   er_last  = FALSE
+}#end if (  ( all(c("AR","HR") %in% nc_hlm1d) ) && (! "ER" %in% nc_hlm1d) )
+
+# Find number of host land model variables
+nhlm1d    = length(nc_hlm1d)
+nhlm2d    = length(nc_hlm2d)
+
+
+# Initialize list of variables by age class
+byage = list()
+for (n in sequence(ncase)){
+  case = case_num[n]
+  for(a in sequence(nbyage)){
+      nc_nvnow                   = nc_byage[a]
+      nc_pref                    = tolower(gsub(pattern="_BY_AGE$",replacement="",x=nc_nvnow))
+      f                          = match(nc_pref,fatesvar$vnam)
+      f_vnam                     = fatesvar$vnam[f]
+      byage[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp*nlo,ncol=nages,dimnames=list(NULL,agekeys)) 
+      } #end of a loop
+} # end of n loop
+
+# by size class
+bydbh = list()
+for(n in sequence(ncase)){
+  case = case_num[n]
+  for(d in sequence(nbydbh)){
+    nc_nvnow        = nc_bydbh[d]
+    nc_pref         = gsub(pattern="_SCLS$",replacement="",x=nc_nvnow)
+    nc_pref         = gsub(pattern="_SCPF$",replacement="",x=nc_pref )
+    nc_pref         = tolower(nc_pref)
+    f               = match(nc_pref,fatesvar$vnam)
+    f_vnam          = fatesvar$vnam[f]
+    bydbh[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp*nlo,ncol=ndbhs,dimnames=list(NULL,dbhkeys))
+    } # end of d
+}     # end of n
+
+# by pft
+bypft = list()
+for(n in sequence(ncase)){
+case = case_num[n]
+  for(p in sequence(nbypft)){
+    nc_nvnow        = nc_bypft[p]
+    nc_pref         = tolower(gsub(pattern="_SCPF$",replacement="",x=nc_nvnow))
+    nc_pref         = tolower(nc_pref)
+    f               = match(nc_pref,fatesvar$vnam)
+    f_vnam          = fatesvar$vnam[f]
+    bypft[[case]][[f_vnam]] = matrix(data=NA_real_,nrow=ntstamp*nlo,ncol=npfts,dimnames=list(NULL,pftinfo$key))
+    } # end of p
+}     # end of n
+
+# Initialize 1D variables available at the HLM
+hlm1d = as_tibble( matrix( data     = NA_real_
+                         , nrow     = ntstamp*ncase*nlo
+                         , ncol     = nhlm1d+1
+                         , dimnames = list(NULL,tolower(c(nc_hlm1d, "CASE")))
+                         )
+                 )
+
+# Initialize soil water status related variables available at the HLM for each soil layer into hlm2dvar
+hlm2d = list()
+
+for (n in sequence(ncase)){
+   case = case_num[n]
+   for(m in sequence(nhlm2dvar)){
+      nc_nvnow        = nc_hlm2d[m]
+      nc_pref         = tolower(nc_nvnow)
+      h               = match(nc_pref,hlm2dvar$vnam)
+      h_vnam          = hlm2dvar$vnam[h]
+      hlm2d[[case]][[h_vnam]] = matrix(data=NA_real_,nrow=ntstamp*nlo,ncol=nsois,dimnames=list(NULL,soikeys))
+     }
+}
+
+# Load soil layers
+# do a loop to avoid hard-coding here 
+cat0("   - Load soil information")
+slayer = tibble()
+
+for (n in sequence(ncase)) {
+nc_conn  = nc_open(filename=nc_zero[n])
+case = case_num[n]
+slayer_now = tibble( zsoi   = c(unlist(ncvar_get(nc=nc_conn, varid='ZSOI'))) 
+               , dzsoi  = c(unlist(ncvar_get(nc=nc_conn,varid='DZSOI' ))) 
+               , bsw    = c(unlist(ncvar_get(nc=nc_conn,varid='BSW' ))) 
+               , hksat  = c(unlist(ncvar_get(nc=nc_conn,varid='HKSAT' ))) 
+               , sucsat = c(unlist(ncvar_get(nc=nc_conn,varid='SUCSAT' ))) 
+               , watsat = c(unlist(ncvar_get(nc=nc_conn,varid='WATSAT' ))) 
+               , lon    = c(rep(lons, time=dsoi[3]))
+               , lat    = c(rep(lats,  time=dsoi[3]))
+               , case  = c(rep_along(zsoi, case))
+               )#end data.table'
+   slayer = rbind(slayer, slayer_now)
+   rm(slayer_now)
+}
+
+
+# Load indices
+index_scpf = tibble( scls   = ncvar_get(nc=nc_conn,varid='fates_scmap_levscpf'  )
+                   , pft    = ncvar_get(nc=nc_conn,varid='fates_pftmap_levscpf' ) 
+                   )#end data.table;  
+index_lon = as.numeric(as.factor(lon))
+index_lat = as.numeric(as.factor(lat))
+# Close connection
+dummy   = nc_close(nc_conn) 
+for (nc in seq_along(nc_conns)){
+   nc_now = get(nc_conns[nc])
+   dummy  = nc_close(nc_now)
+}
+
+```
+
+
+
+
+
+```{r,label='retrieve-values',message=FALSE,results='hide'}
+if ("nc_conn" %in% ls()){dummy = nc_close(nc_conn); rm(nc_conn)}
+for (n in sequence(ncase)){
+   case = case_num[n]
+   for (w in sequence(ntstamp)){
+   # Extract times and build file name
+      w_month   = month(tstamp[w])
+      w_year    = year (tstamp[w])
+      w_ymlab   = sprintf("%4.4i-%2.2i",w_year,w_month)
+      nc_base   = paste0(case_name[n],".",hlm_midfix,"." ,w_ymlab,".nc")
+      nc_file   = file.path(simul_path[n],nc_base)
+      row_start = (w-1)*nlo + 1 #the 1st row for appending the current list of values
+      row_end   = row_start + nlo -1
+      
+
+   
+   # Find conversion factors for monthly variables.
+   cmon.day = days_in_month(tstamp[w])
+   cmon.hr  = day.hr  * cmon.day
+   cmon.min = day.min * cmon.day
+   cmon.sec = day.sec * cmon.day
+
+  
+   # Open NetCDF connection and retrieve variable names
+   nc_conn  = nc_open(filename=nc_file)
+   nc_nvars = nc_conn$nvars
+   nc_vlist = rep(NA_character_,times=nc_nvars)
+   for (v in sequence(nc_nvars)) nc_vlist[v] = nc_conn$var[[v]]$name
+
+
+    
+
+   # Read variables by age, and assign current values to the matrix.  
+   for (a in sequence(nbyage)){
+      nc_nvnow            = nc_byage[a]
+      nc_pref             = tolower(gsub(pattern="_BY_AGE$",replacement="",x=nc_nvnow))
+      f                   = match(nc_pref,fatesvar$vnam)
+      f_vnam              = fatesvar$vnam[f]
+      f_add0              = eval(parse(text=fatesvar$add0_ag[f]))
+      f_mult              = eval(parse(text=fatesvar$mult_ag[f]))
+      nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
+      dim.col             = dim(nc_dat)[3]
+      ncm_dat             = matrix(nc_dat, ncol=dim.col)
+      nc_dat             = f_add0 + f_mult * ncm_dat
+      byage[[case]][[f_vnam]][row_start:row_end,] = nc_dat
+   }#end for (a in sequence(nbyage))
+
+   #---~--- 
+   #   Read variables by size, and assign current values to the matrix.  In case LAI
+   # is in the list and it is the last variable, we calculate it from canopy and under
+   # story, after loading all variables
+   #---~---
+   for (d in sequence(nbydbh-laidbh_last)){
+      nc_nvnow            = nc_bydbh[d]
+      #is_scpf             = grepl(pattern="_SCPF$",x=nc_nvnow) as we only have one PFT, skip aggregating pft values for each size class here
+      nc_pref             = gsub(pattern="_SCLS$",replacement="",x=nc_nvnow)
+      nc_pref             = gsub(pattern="_SCPF$",replacement="",x=nc_pref )
+      nc_pref             = tolower(nc_pref)
+      f                   = match(nc_pref,fatesvar$vnam)
+      f_vnam              = fatesvar$vnam[f]
+      f_add0              = eval(parse(text=fatesvar$add0_sp[f]))
+      f_mult              = eval(parse(text=fatesvar$mult_sp[f]))
+      f_aggr              = match.fun(fatesvar$aggr[f])
+      nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
+      nc_dat             = f_add0 + f_mult * nc_dat
+      dim.col             = dim(nc_dat)[3]
+      ncm_dat             = matrix(nc_dat, ncol=dim.col)
+      bydbh[[case]][[f_vnam]][row_start:row_end,] = ncm_dat #here we skip aggregating data for size class for by SCPF variable as we only have 1 PFT
+   }#end for (d in sequence(nbydbh-laidbh_last))
+
+   # Find total LAI if sought.
+   if (laidbh_last){
+      bydbh[[case]]$lai[row_start:row_end,] = bydbh[[case]]$lai_canopy[row_start:row_end,] + bydbh[[case]]$lai_understory[row_start:row_end,]
+   }#end if (lai.last)
+
+
+
+   #---~--- 
+   #   Read variables by PFT, and assign current values to the matrix.  In case LAI
+   # is in the list and it is the last variable, we calculate it from canopy and under
+   # storey, after loading all variables
+   #---~---
+   for (p in sequence(nbypft-laipft_last)){
+      # Load variable information
+      nc_nvnow = nc_bypft[p]
+      nc_pref  = tolower(gsub(pattern="_SCPF$",replacement="",x=nc_nvnow))
+      f        = match(nc_pref,fatesvar$vnam)
+      f_vnam   = fatesvar$vnam[f]
+      f_add0   = eval(parse(text=fatesvar$add0_sp[f]))
+      f_mult   = eval(parse(text=fatesvar$mult_sp[f]))
+      f_aggr   = match.fun(fatesvar$aggr[f])
+      f_dbh01  = fatesvar$dbh01[f]
+
+      # Retrieve data.
+      nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
+      dim.col             = dim(nc_dat)[3]
+      ncm_dat             = matrix(nc_dat, ncol=dim.col)
+      ncm_dat             = f_add0 + f_mult * ncm_dat
+
+      # Aggregate data across size classes
+      nc_aggr        = rowSums(ncm_dat, na.rm=TRUE)
+      bypft[[case]][[f_vnam]][row_start:row_end,] = nc_aggr
+   }#end for (d in sequence(nbydbh-laidbh_last))
+
+   
+   # Find total LAI if sought.
+   if (laipft_last){
+      bypft[[case]]$lai[row_start:row_end,] = bypft[[case]]$lai_canopy[row_start:row_end,] + bypft[[case]]$lai_understory[row_start:row_end,]
+   }#end if (laipft_last)
+
+
+    
+   # Read 1D variables  
+   for (v in sequence(nhlm1d-etr_last-er_last)){
+      nc_nvnow            = nc_hlm1d[v]
+      nc_pref             = tolower(x=nc_nvnow)
+      h                   = match(nc_pref,hlm1dvar$vnam)
+      h_vnam              = hlm1dvar$vnam[h]
+      h_add0              = eval(parse(text=hlm1dvar$add0[h]))
+      h_mult              = eval(parse(text=hlm1dvar$mult[h]))
+      nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
+      ncm_dat             = matrix(nc_dat, ncol=1)
+      if (n==1){
+         hlm1d[[h_vnam]][row_start:row_end]  = h_add0 + h_mult * ncm_dat
+         hlm1d[['case']][row_start:row_end]  = case
+      }else{
+         t = (n-1)*ntstamp*nlo
+         s = t + row_start
+         e = t + row_end
+         hlm1d[[h_vnam]][s:e] = h_add0 + h_mult * ncm_dat
+         hlm1d[['case']][s:e] = case
+         }
+   }#for (h in sequence(nhlm1d-etr_last-et_last))
+
+   # Find total ET.
+   if (etr_last){
+      if(n==1){
+         hlm1d$qevtr[row_start:row_end] = hlm1d$qvege[row_start:row_end] + hlm1d$qvegt[row_start:row_end] + hlm1d$qsoil[row_start:row_end]
+      }else{
+         t = (n-1)*ntstamp*nlo
+         s = t + row_start
+         e = t + row_end
+         hlm1d$qevtr[s:e] = hlm1d$qvege[s:e] + hlm1d$qvegt[s:e] + hlm1d$qsoil[s:e]
+      }
+   }#end if (etr_last)
+
+   # Find total ET.
+   if (er_last){
+      if(n==1){
+         hlm1d$er[row_start:row_end] = hlm1d$ar[row_start:row_end] + hlm1d$hr[row_start:row_end]
+      }else{
+         t = (n-1)*ntstamp*nlo
+         s = t + row_start
+         e = t + row_end
+         hlm1d$er[s:e] = hlm1d$ar[s:e] + hlm1d$hr[s:e] 
+      }
+   }#end if (er_last)
+
+   # Read 2D variables
+   for (m in sequence(nhlm2d)){
+      nc_nvnow            = nc_hlm2d[m]
+      nc_pref             = tolower(x=nc_nvnow)
+      h                   = match(nc_pref,hlm2dvar$vnam)
+      h_vnam              = hlm2dvar$vnam[h]
+      h_add0              = eval(parse(text=hlm2dvar$add0_sl[h]))
+      h_mult              = eval(parse(text=hlm2dvar$mult_sl[h]))
+      nc_dat              = ncvar_get(nc=nc_conn,varid=nc_nvnow)
+      nc_dat              = h_add0 + h_mult * nc_dat
+      dim.col             = dim(nc_dat)[3]
+      ncm_dat             = matrix(nc_dat, ncol=dim.col)
+      hlm2d[[case]][[h_vnam]][row_start:row_end,1:dim.col]  = ncm_dat
+  
+     }#for
+   
+   # Close connection
+   dummy   = nc_close(nc_conn)
+}#end for (w in sequence(nstamp))
+}#end for (n in sequence(ncase))
+
+```
+
+
+
+
+
+```{r,label='scale-age'}
+cat0(" + Rescale variables by age class.")
+for (n in sequence(ncase)){
+   case = case_num[n]
+   for (a in sequence(nbyage)){
+   #--- Match variables
+      f        = match(names(byage[[case]])[a],fatesvar$vnam)
+      f_vnam   = fatesvar$vnam [f]
+      f_desc   = fatesvar$desc [f]
+      f_stack  = fatesvar$stack[f]
+   #---~---
+
+   #--- Proceed only if the variable is stacked and not the patch area.
+   if (f_stack && (! (f_vnam %in% "patch_area"))){
+      cat0("   - ",f_desc,".")
+      byage[[case]][[f_vnam]] = byage[[case]][[f_vnam]] * byage[[case]]$patch_area
+   }#end if (f_stack && (! (f_vnam %in% "patch_area")))
+      
+}
+   }#end for (a in sequence(nbyage))
+
+```
+
+
+```{r,label='melt-data'}
+cat0(" + Turn age-dependent matrices into tibble objects.")
+
+agelist=list()
+for (n in sequence(ncase)){
+   age_melt = NULL
+   case = case_num[n]
+   for (a in sequence(nbyage)){
+   #--- Match variables.
+      f        = match(names(byage[[case]])[a],fatesvar$vnam)
+      f_vnam   = fatesvar$vnam[f]
+      f_desc   = fatesvar$desc[f]
+      cat0("   - ",f_desc,".")
+      
+      #--- Create molten data table for this variable.  
+      now_age      = as_tibble(byage[[case]][[f_vnam]])
+      now_age$time = rep(tstamp, each=nlo)
+      now_age$lon  = rep(lons, time=ntstamp)
+      now_age$lat  = rep(lats, time=ntstamp)
+      now_age$case = rep_along(time, x = case)
+      now_melt     = as_tibble(reshape2::melt(data=now_age,id.vars=c("case","time", "lon"       
+                              ,"lat"),variable.name="age",value.name=f_vnam))
+      #--- Merge data table
+      if (is.null(age_melt)){
+         age_melt = now_melt
+         }else{
+         age_melt = as_tibble(merge(x=age_melt,y=now_melt,by=c("case", "lon","lat","time","age"),all=TRUE))
+                              }#end if (is.null(age_melt))
+   #---~---
+   agelist[[n]] = age_melt
+  }#end for (a in sequence(nbyage))
+}#end for (n in sequence(ncase))
+rm(age_melt) 
+
+age_melt = do.call(rbind, agelist)
+
+cat0(" + Turn size-dependent matrices into data tables.")
+
+dbhlist = list()
+for(n in sequence(ncase)){
+   dbh_melt = NULL
+   case=case_num[n]
+   for (d in sequence(nbydbh)){
+      
+   #--- Match variables.
+      f        = match(names(bydbh[[case]])[d],fatesvar$vnam)
+      f_vnam   = fatesvar$vnam[f]
+      f_desc   = fatesvar$desc[f]
+      cat0("   - ",f_desc,".")
+   #---~---
+
+   #--- Create molten data table for this variable.  
+      now_dbh      = as_tibble(bydbh[[case]][[d]])
+      now_dbh$time = rep(tstamp, each=nlo)
+      now_dbh$lon  = rep(lons, time=ntstamp)
+      now_dbh$lat  = rep(lats, time=ntstamp)
+      now_dbh$case = rep_along(time, x=case)
+      now_melt     = as_tibble(reshape2::melt(data=now_dbh,id.vars=c("case", "time", "lon", "lat"),variable.name="dbh",value.name=f_vnam))
+   #---~---
+
+   #--- Merge data table
+      if (is.null(dbh_melt)){
+         dbh_melt = now_melt
+      }else{
+         dbh_melt = merge(x=dbh_melt,y=now_melt,by=c("case", "lon","lat","time","dbh"),all=TRUE)
+      }#end if (is.null(scls.melt))
+   #---~---
+      dbhlist[[n]] = dbh_melt
+   }#end for (d in sequence(nbydbh))
+}#end for(n in sequence(ncase))
+#---~---
+rm(dbh_melt)
+
+dbh_melt = do.call(rbind, dbhlist)
+
+
+cat0(" + Turn PFT-dependent matrices into data tables.")
+pftlist = list()
+for(n in sequence(ncase)){
+   pft_melt = NULL
+   case = case_num[n]
+   for (p in sequence(nbypft)){
+   #--- Match variables.
+      f        = match(names(bypft[[case]])[p],fatesvar$vnam)
+      f_vnam   = fatesvar$vnam[f]
+      f_desc   = fatesvar$desc[f]
+      cat0("   - ",f_desc,".")
+   #---~---
+
+   #--- Create molten data table for this variable.  
+      now_pft      = as_tibble(bypft[[case]][[p]])
+      now_pft$time = rep(tstamp, each=nlo)
+      now_pft$lon  = rep(lons, time=ntstamp)
+      now_pft$lat  = rep(lats, time=ntstamp)
+      now_pft$case = rep_along(time, x=case)
+      now_melt     = as_tibble(reshape2::melt(data=now_pft,id.vars=c("case", "time", "lon","lat"),variable.name="pft",value.name=f_vnam))
+   #---~---
+
+   #--- Merge data table
+      if (is.null(pft_melt)){
+         pft_melt = now_melt
+      }else{
+         pft_melt = as_tibble(merge(x=pft_melt,y=now_melt,by=c("case", "time", "lon","lat", "pft"),all=TRUE))
+      }#end if (is.null(pft_melt))
+   #---~---
+      pftlist[[n]] = pft_melt
+   }#end for (p in sequence(nbypft))
+}#end for (n in sequence(ncase))
+#---~---
+rm(pft_melt)
+
+pft_melt = do.call(rbind, pftlist)
+
+
+cat0(" + Turn soil layer-dependent matrices into data tables.")
+soilist = list()
+for(n in sequence(ncase)){
+   soi_melt = NULL
+   case=case_num[n]
+   for (s in sequence(nhlm2d)){
+      
+   #--- Match variables.
+      h        = match(names(hlm2d[[case]])[s],hlm2dvar$vnam)
+      h_vnam   = hlm2dvar$vnam[h]
+      h_desc   = hlm2dvar$desc[h]
+      cat0("   - ",h_desc,".")
+   #---~---
+
+   #--- Create molten data table for this variable.  
+      now_soi      = as_tibble(hlm2d[[case]][[s]])
+      now_soi$time = rep(tstamp, each=nlo)
+      now_soi$lon  = rep(lons, time=ntstamp)
+      now_soi$lat  = rep(lats, time=ntstamp)
+      now_soi$case = rep_along(time, x=case)
+      now_melt     = as_tibble(reshape2::melt(data=now_soi,id.vars=c("case", "time"                 
+                                             ,"lon","lat"),variable.name="soi",value.name=h_vnam))
+   #---~---
+
+   #--- Merge data table          
+      if (is.null(soi_melt)){
+         soi_melt = now_melt
+      }else{
+         soi_melt = merge(x=soi_melt,y=now_melt,by=c("case", "time", "lon","lat","soi"),all=TRUE)
+      }#end if (is.null(scls.melt))
+   #---~---
+     soilist[[n]] = soi_melt
+   }#end for (s in sequence(nsoi))
+}#end for(n in sequence(ncase))
+rm(soi_melt)
+soi_melt=do.call(rbind, soilist)
+#---~---
+
+
+#--- Remove data that are not molten.
+byage = age_melt 
+bydbh = dbh_melt
+bypft = pft_melt
+bysoi = soi_melt
+rm(age_melt,dbh_melt,pft_melt, soi_melt)
+
+#--- mutate all mortality into fraction by dividing each by nplant
+bypft = bypft %>% mutate(  m1 = m1/nplant
+                         , m2 = m2/nplant
+                         , m3 = m3/nplant
+                         , m5 = m5/nplant
+                         , m6 = m6/nplant
+                         , m9 = m9/nplant
+                         , mortality_canopy = mortality_canopy/nplant_canopy
+                         , mortality_understory = mortality_understory/nplant_understory)
+
+bydbh = bydbh %>% mutate(  m1 = m1/nplant
+                         , m2 = m2/nplant
+                         , m3 = m3/nplant
+                         , m5 = m5/nplant
+                         , m6 = m6/nplant
+                         , m9 = m9/nplant
+                         , mortality_canopy = mortality_canopy/nplant_canopy
+                         , mortality_understory = mortality_understory/nplant_understory)
+
+cat0(" + Convert classes to integers.")
+byage$age = as.numeric(byage$age)
+bydbh$dbh = as.numeric(bydbh$dbh)
+bypft$pft = as.numeric(bypft$pft)
+bysoi$soi = as.numeric(bysoi$soi)
+
+
+```
+
+
+
+
+```{r,label='load-site-data'}
+if ("nc_site" %in% ls()){dummy = nc_close(nc_site); rm(nc_site)}
+
+# TO-DO: loop for reading multiple site data
+# Open NetCDF connection and retrieve variable names
+cat0(" + Load site data from ",site_base,".")
+nc_site  = nc_open(filename=site_file)
+nc_nvars = nc_site$nvars
+nc_ndims = nc_site$ndims
+nc_dlist = rep(NA_character_,times=nc_ndims)
+nc_vlist = rep(NA_character_,times=nc_nvars)
+for (d in sequence(nc_ndims)) nc_dlist[d] = nc_site$dim[[d]]$name
+for (v in sequence(nc_nvars)) nc_vlist[v] = nc_site$var[[v]]$name
+
+# Select variables to load
+nc_obs1d    = nc_vlist[tolower(nc_vlist) %in% hlm1dvar$vnam[hlm1dvar$assess]]
+nc_obs2d    = nc_vlist[tolower(nc_vlist) %in% hlm2dvar$vnam[hlm2dvar$assess]]
+nc_obs      = c(nc_obs1d, nc_obs2d)
+
+
+# Extract time information
+site_time0  = as_datetime(gsub(pattern="^days since ",replacement="",x=nc_site$dim$time$units))
+site_time   = site_time0 + days(nc_site$dim$time$vals)
+n_site_time = nc_site$dim$time$len
+
+# Initialise a tibble that will host all data
+site1d = tibble( time = site_time)
+
+# Find conversion factors for monthly variables.
+cmon.day = days_in_month(site1d$time)
+cmon.hr  = day.hr  * cmon.day
+cmon.min = day.min * cmon.day
+cmon.sec = day.sec * cmon.day
+
+# Loop through variables, and load data sets.
+for (o in seq_along(nc_obs)){
+   nc_nvnow        = nc_obs[o]
+   if(nc_nvnow=="H2OSOI"){ #in hlm2dvar
+   h               = match(tolower(nc_nvnow),hlm2dvar$vnam)
+   h_vnam          = hlm2dvar$vnam[h]
+   h_desc          = hlm2dvar$desc[h]
+   h_add0          = eval(parse(text=hlm2dvar$add0_sl[h]))
+   h_mult          = eval(parse(text=hlm2dvar$mult_sl[h]))
+   nc_dat          = ncvar_get(nc=nc_site,varid=nc_nvnow)
+   cat0("   - Retrieve ",h_desc,".")
+   site1d[[h_vnam]] = h_add0 + h_mult * nc_dat  
+   }else{
+   h               = match(tolower(nc_nvnow),hlm1dvar$vnam)
+   h_vnam          = hlm1dvar$vnam[h]
+   h_desc          = hlm1dvar$desc[h]
+   h_add0          = eval(parse(text=hlm1dvar$add0[h]))
+   h_mult          = eval(parse(text=hlm1dvar$mult[h]))
+   nc_dat          = ncvar_get(nc=nc_site,varid=nc_nvnow)
+   cat0("   - Retrieve ",h_desc,".")
+   site1d[[h_vnam]] = h_add0 + h_mult * nc_dat
+   }
+}#end for (o in seq_along(nc_obs))
+
+
+# Load site coordinates. We will check whether observations and model are reasonably close.
+site_coord = tibble( clon = c(ncvar_get(nc=nc_site,varid="LONGXY"))
+                   , clat = c(ncvar_get(nc=nc_site,varid="LATIXY"))
+                   , wlon = c(ncvar_get(nc=nc_site,varid="EDGEW" ))
+                   , elon = c(ncvar_get(nc=nc_site,varid="EDGEE" ))
+                   , slat = c(ncvar_get(nc=nc_site,varid="EDGES" ))
+                   , nlat = c(ncvar_get(nc=nc_site,varid="EDGEN" ))
+                   )#end tibble
+
+
+# Close file and remove connection.
+dummy = nc_close(nc_site)
+rm(nc_site)
+
+```
+
+
+
+
+
+```{r,label='time-intersect'}
+# Find the minimum interval that has overlaps with both site and model.
+tstampa_com = max(c(min(tstamp),min(site1d$time)))
+tstampz_com = min(c(max(tstamp),max(site1d$time)))
+
+# Restrict time to the overlapping period
+tstamp_com  = tstamp[(tstamp >= tstampa_com) & (tstamp <= tstampz_com)]
+ntstamp_com = length(tstamp_com)
+
+# Trim site observations to the overlapping period. Also, standardize the data so we
+# use only one of NA or NaN.
+#site1d = site1d %>%
+         #filter( (time >= tstampa_com) & (time <= tstampz_com)) %>%
+         #mutate_at(vars(-time),function(x) ifelse(is.nan(x),NA,x))
+#  Load pre-prossed lai time series to bind with site1d
+emean_lai = read.csv(lai_file, stringsAsFactors = FALSE)
+emean_lai = emean_lai %>% rename(tlai=lai)
+site1d = site1d %>% 
+         mutate(year=year(time),
+                month=month(time)) %>% 
+         left_join(emean_lai, by=c("year", "month")) %>% 
+         select(!c(year, month))
+rm(emean_lai)
+```
+
+
+
+
+
+
+
+```{r,label='model-seasonal-means'}
+# seasonal cycles
+
+st          = slayer                                       %>% 
+              select(zsoi, dzsoi)                          %>% 
+              mutate(zsoi = as.numeric(as.factor(zsoi)))   %>% 
+              rename(soi = zsoi) 
+st          = st[1:25,]                   
+bysoi       = bysoi %>%  left_join(st, by="soi")  
+sl          = unique(bysoi$soi)[1:3]
+soivar      = hlm2dvar$vnam
+emean_soi10 = bysoi                                                       %>% 
+              filter(soi %in% sl)                                         %>% 
+              dplyr::select(!c(soi, dzsoi))                               %>% 
+              group_by(time, case, lon, lat)                              %>%
+              summarise_all(mean, na.rm=TRUE)                             %>% 
+              ungroup()    
+
+mmean_soi10 = emean_soi10                                                 %>%
+              mutate( year = year(time), month = month(time))             %>% 
+              group_by(month, case, lon, lat)                             %>% 
+              dplyr::select(!c(time, year))                               %>% 
+              summarise_all(mean, na.rm=TRUE)                             %>% 
+              ungroup()                                                   %>% 
+              rename_at(vars(soivar), function(x) paste0(x,"_mean"))
+# Find the lower range of the seasonal cycle
+mqlwr_soi = emean_soi10                                                   %>%
+        mutate( year = year(time), month = month(time))                   %>%
+        group_by(month,case,lon,lat)                                      %>%
+        dplyr::select(! c(time,year))                                     %>%
+        summarise_all(quantile,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(soivar), function(x) paste0(x,"_qlwr"))
+
+# Find the upper range of the seasonal cycle
+mqupr_soi = emean_soi10                                                   %>%
+        mutate( year = year(time), month = month(time))                   %>%
+        group_by(month,case,lon,lat)                                      %>%
+        dplyr::select(! c(time,year))                                     %>%
+        summarise_all(quantile,probs=qupr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(soivar), function(x) paste0(x,"_qupr"))
+
+mmean_soi10 = merge(x=merge(x=mmean_soi10, y=mqlwr_soi, by=c("case","lon","lat","month")),
+                            y=mqupr_soi, by=c("case","lon","lat","month"))#end merge
+
+#select some hlm 1D variables for making seasonal cycle plots
+hlmsvars      = c("fsh_g", "fsh_v", "hr", "ar", "qevtr", "qsoil", "qvege", "qvegt", "eflx_lh_tot", "fire_area",
+                  "mortality_carbonflux_canopy", "mortality_carbonflux_understory")
+hlm_scy       = hlm1d                                           %>% 
+                dplyr::select(all_of(c("case", hlmsvars)))      %>% 
+                mutate( time = rep(tstamp, each = ncase*nlo)
+                      , lon  = rep(lons, time = ncase*ntstamp)
+                      , lat  = rep(lats, time = ncase*ntstamp))
+
+
+hlm_mmean = hlm_scy                                             %>% 
+            mutate(month=month(time))                           %>% 
+            dplyr::select(!time)                                %>% 
+            group_by(case,lon,lat,month)                        %>% 
+            summarise_all(mean, na.rm=TRUE)                     %>% 
+            ungroup()                                           %>% 
+            rename_at(vars(hlmsvars), function(x) paste0(x,"_mean"))
+
+# Find the lower range of the seasonal cycle
+hlm_mqlwr = hlm_scy                                                       %>%
+        mutate( month = month(time))                                      %>%
+        group_by(case,lon,lat,month)                                      %>%
+        dplyr::select(!time)                                              %>%
+        summarise_all(quantile,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(hlmsvars), function(x) paste0(x,"_qlwr"))
+
+# Find the upper range of the seasonal cycle
+hlm_mqupr = hlm_scy                                                       %>%
+        mutate( month = month(time))                                      %>%
+        group_by(case,lon,lat,month)                                      %>%
+        dplyr::select(!time)                                              %>%
+        summarise_all(quantile,probs=qupr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(hlmsvars), function(x) paste0(x,"_qupr"))
+
+hlm_mmean = merge(x=merge(x=hlm_mmean, y=hlm_mqlwr, by=c("case","lon","lat","month")),
+                            y=hlm_mqupr, by=c("case","lon","lat","month"))#end merge
+
+
+
+#selected variables for making mean season cycle plots
+mmvar = c("agb", "gpp",  "lai",
+          "m1", "m2", "m3", "m5",
+          "m6", "m9", "mortality_canopy", 
+          "mortality_understory")
+emean = bydbh                                                             %>% 
+        dplyr::select(all_of(c("case","lon","lat","time",mmvar)))         %>% 
+        group_by(case,lon,lat,time)                                       %>% 
+        summarise_all(sum, na.rm=TRUE)                                    %>% 
+        ungroup()
+
+mmean = emean                                                             %>%
+        mutate( year = year(time), month = month(time))                   %>%
+        group_by(case,lon,lat,month)                                      %>%
+        dplyr::select(! c(time,year))                                     %>%
+        summarise_all(mean, na.rm=TRUE)                                   %>%
+        ungroup()                                                         %>%
+        rename_at(vars(mmvar), function(x) paste0(x,"_mean"))
+
+# Find the lower range of the seasonal cycle
+mqlwr = emean                                                             %>%
+        mutate( year = year(time), month = month(time))                   %>%
+        group_by(case,lon,lat,month)                                      %>%
+        dplyr::select(! c(time,year))                                     %>%
+        summarise_all(quantile,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(mmvar), function(x) paste0(x,"_qlwr"))
+
+# Find the upper range of the seasonal cycle
+mqupr = emean                                                             %>%
+        mutate( year = year(time), month = month(time))                   %>%
+        group_by(case,lon,lat,month)                                      %>%
+        dplyr::select(! c(time,year))                                     %>%
+        summarise_all(quantile,probs=qupr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(mmvar), function(x) paste0(x,"_qupr"))
+
+# Find the annual averages.
+mmean = merge(x= merge(x=mmean,y=mqlwr,by=c("case","lon","lat","month")),
+                         y = mqupr, by=c("case","lon","lat","month"))#end merge
+#merge mmean and mmean_soi10 and convert to tibble
+# Find the annual averages.
+mmean = as_tibble(merge(x=merge(x=mmean,y=mmean_soi10,by=c("case","lon","lat","month")),
+                         y=hlm_mmean, by=c("case","lon","lat","month"))#end merge
+                 )#end as_tibble
+      
+#  Convert case to integer 
+mmean$source = as.numeric(as.factor(mmean$case))
+# Sort data by month
+mmean = mmean %>% arrange(month, source)
+
+```
+
+
+
+
+
+
+
+```{r fig.height=18, fig.width=22.5, label='plot-seasonal-cycle'}
+cat0(" + Plot seasonal cycles of all bypft, soil water status related variables, and hlm 1D variables.") 
+
+scy_vars =  c(mmvar, soivar, hlmsvars)
+# Set legends, colour, and label
+#case_legend  = "Simulation case"
+leg_colours = hlm_color
+leg_labels  = case_label
+leg_labels = str_sort(leg_labels)
+
+gg_emean = list()
+for (v in seq_along(scy_vars)){
+   # Load variable
+   h        = c(match(scy_vars[v],fatesvar$vnam), match(scy_vars[v],hlm2dvar$vnam), match(scy_vars[v],hlm1dvar$vnam))
+   
+   if(length(which(!is.na(h)))>1){ #if the varibale in both fatesvar and hlm1dvar, only read from fatesvar
+     svars = c("fatesvar", "hlm2dvar")
+     h     = c(match(scy_vars[v],fatesvar$vnam), match(scy_vars[v],hlm2dvar$vnam)) #update h
+   }else{svars = c("fatesvar", "hlm2dvar", "hlm1dvar")}
+   
+   whichvar = svars[which(!is.na(h))]
+   var_now  = get(whichvar)
+   h        =h[!is.na(h)]
+   h_vnam   = var_now$vnam [h]
+   h_vmean  = paste0(h_vnam,"_mean")
+   h_vqlwr  = paste0(h_vnam,"_qlwr")
+   h_vqupr  = paste0(h_vnam,"_qupr")
+   h_desc   = var_now$desc [h]
+   h_short  = var_now$short[h]
+   h_unit   = var_now$unit [h]
+   h_legend = v == 1 
+
+
+   # Temporary data table. We convert the classes back to factor.
+   mmean_now       = mmean
+   mmean_now$month = factor(mmean_now$month,levels=unique(mmean_now$month),
+                            labels=month.abb)
+   mmean_now      = mmean_now                                                                   %>% 
+                    select(all_of(c("case","lon","lat","month",h_vmean,h_vqlwr,h_vqupr)))       %>% 
+                    mutate(lon = lon-360)
+  
+  # Initialize plot (we use line)
+   gg_now = ggplot()
+   gg_now = gg_now + geom_raster(data = mmean_now, aes_string(x="lon",y="lat",fill=h_vmean)
+                                ,interpolate=FALSE)
+   gg_now = gg_now + geom_sf(na.rm=TRUE)
+   #gg_now = gg_now + coord_sf(crs=5070, datum=NA)
+   gg_now = gg_now + facet_wrap(.~month, ncol=4)
+   gg_now = gg_now + scale_fill_continuous(low="thistle2", high="darkred" 
+                                          ,guide="colorbar",na.value="white")
+   gg_now = gg_now + borders(database="state",regions="california")
+   
+   
+   gg_now = gg_now + labs(x="Longitude",y="Latitude"
+                         ,title=h_desc         
+                         ,fill=desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_bw( base_size = gg_ptszl, base_family = "Helvetica",base_line_size = 0.5,base_rect_size =0.5)
+   gg_now = gg_now + theme(legend.position    = "right"
+                         , legend.text=element_text(size=gg_ptszl)
+                         , axis.text.x         = element_text( size   = gg_ptszl
+                         , margin              = unit(rep(0.35,times=4),"cm"))#end element_text
+                         , axis.text.y         = element_text( size   = gg_ptszl
+                         , margin = unit(rep(0.35,times=4),"cm")
+                                                           )#end element_text
+                         , axis.ticks.length   = unit(-0.25,"cm")
+                         , panel.grid.major = element_blank()
+                         , panel.grid.minor = element_blank()
+                         ) #end theme
+  
+ 
+   # Save plots.
+   for (d in sequence(n_device)){
+    h_output = paste0(h_vnam, "meanseason-cycle-",case_name,".",gg_device[d])
+    dummy    = ggsave( filename = h_output
+                    , plot     = gg_now
+                    , device   = gg_device[d]
+                    , path     = secy_path
+                    , width    = gg_widthl
+                    , height   = gg_heightl
+                    , units    = gg_units
+                    , dpi      = gg_depth
+                    )#end ggsave
+   }#end for (d in sequence(ndevice))
+
+  # Write plot settings to the list.
+  gg_emean[[h_vnam]] = gg_now
+}#end for (v in seq_along(scy_vars)){
+
+# If sought, plot images on screen
+if (gg_screen) gg_emean
+
+#
+
+```
+
+
+
+
+
+```{r,label='merge-data',message=FALSE,results='hide'}
+# First we have to filter out HLM variables that are not available at site or within the time frame of obs; 
+# and then combine HLM with site obs to make comparison plots
+cat0(" + Find the longitude and latitude for extracing the corresponding grid cell from model.")
+
+lon.min = site_coord$wlon
+lon.max = site_coord$elon
+lat.min = site_coord$slat
+lat.max = site_coord$nlat
+lon_use = lon[which(lon>=lon.min&lon<=lon.max)]
+lat_use = lat[which(lat>=lat.min&lat<=lat.max)]
+lon_com = lon_use[which(abs(lon_use-site_coord$clon)<=0.25)] #for 0.5 degree spatial resolution
+lat_com = lat_use[which(abs(lat_use-site_coord$clat)<=0.25)]
+
+#bind soil water status variables to hlm1d
+hlm_com = hlm1d                                                       %>% 
+          mutate(time = rep(tstamp, each = ncase*nlo   ) 
+                ,lon  = rep(lons, time = ncase*ntstamp )
+                ,lat  = rep(lats, time = ncase*ntstamp))     
+hlm_com = hlm_com                                                     %>% 
+          left_join(emean_soi10, by = c("time", "case", "lon","lat"))
+
+# intersect variables
+cat0(" + Find the variables common to both site and model.")
+# Find common variables
+var_both = intersect(names(site1d),names(hlm_com))
+var_both = var_both[! var_both %in% "time"]
+
+# Restrict variables for both site and model
+site1d  = site1d %>% dplyr::select( all_of(c("time",var_both)))
+
+hlm_com = hlm_com                                                        %>% 
+          dplyr::select( all_of(c('time','case','lon','lat',var_both)))  %>%
+          filter((lon == lon_com) & (lat == lat_com)                )    %>% #filter by lon and lat
+          #filter((time >= tstampa_com) & (time <= tstampz_com)      )    %>% #filter by time window
+          dplyr::select(-c("lon","lat"))
+
+# turn case of hlm into integer
+hlm_com$case = as.numeric(as.factor(hlm_com$case))
+
+cat0(" + Merge data sets into a single tibble.")
+
+emean_com  = rbind( site1d %>% mutate(case = 0L)
+              , hlm_com)   %>%
+         dplyr::select(all_of(c("time","case",var_both))) %>% 
+         
+         rename(source = case)
+
+
+# Find the mean seasonal cycle.
+mmean_com = emean_com                                                     %>%
+        mutate(month = month(time))                                       %>%
+        group_by(month,source)                                            %>%
+        dplyr::select(-time)                                              %>%
+        summarise_all(mean, na.rm=TRUE)                                   %>%
+        ungroup()                                                         %>%
+        rename_at(vars(var_both), function(x) paste0(x,"_mean"))
+
+# Find the lower range of the seasonal cycle
+mqlwr_com = emean_com                                                     %>%
+        mutate(month = month(time))                                       %>%
+        group_by(month,source)                                            %>%
+        dplyr::select(-time)                                              %>%
+        summarise_all(quantile,probs=qlwr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(var_both), function(x) paste0(x,"_qlwr"))
+
+# Find the upper range of the seasonal cycle
+mqupr_com = emean_com                                                     %>%
+        mutate(month = month(time))                                       %>%
+        group_by(month,source)                                            %>%
+        dplyr::select(-time)                                              %>%
+        summarise_all(quantile,probs=qupr_ribbon,names=FALSE, na.rm=TRUE) %>%
+        ungroup()                                                         %>%
+        rename_at(vars(var_both), function(x) paste0(x,"_qupr"))
+
+# Find the annual averages.
+mmean_com = as_tibble( merge( x  = merge(x=mmean_com,y=mqlwr_com,by=c("month","source"))
+                        , y  = mqupr_com
+                        , by = c("month","source")
+                        )#end merge
+                 )#end as_tibble
+
+# Sort data by month and source
+mmean_com = mmean_com %>% arrange(source,month)         
+
+
+```
+
+
+
+
+```{r,label='model-site-comparison',message=FALSE,results='hide',fig.width=15, fig.height=12}
+cat0(" + Plot the mean seasonal cycle of site measurements/estimates and model predictions.")
+
+# Set legends
+leg_colours = c(site_colour,hlm_colour)
+leg_labels  = c("Site",case_label)
+
+gg_emean = list()
+for (v in seq_along(var_both)){
+   # Load variable
+   h        = c(match(var_both[v],hlm1dvar$vnam), match(var_both[v],hlm2dvar$vnam))
+   hvars = c("hlm1dvar", "hlm2dvar")
+   whichvar = hvars[which(!is.na(h))]
+   var_now  = get(whichvar)
+   h        =h[!is.na(h)]
+   h_vnam   = var_now$vnam [h]
+   h_vmean  = paste0(h_vnam,"_mean")
+   h_vqlwr  = paste0(h_vnam,"_qlwr")
+   h_vqupr  = paste0(h_vnam,"_qupr")
+   h_desc   = var_now$desc [h]
+   h_short  = var_now$short[h]
+   h_unit   = var_now$unit [h]
+   h_legend = v == 1 
+
+
+   # Temporary data table. We convert the classes back to factor.
+   h_mmean        = mmean_com
+   h_mmean$source = factor(h_mmean$source,levels=unique(h_mmean$source))
+
+   # Initialise plot (we use line)
+   gg_now = ggplot( data    = h_mmean
+                  , mapping = aes_string( x      = "month"
+                                        , group  = "source"
+                                        , colour = "source"
+                                        , fill   = "source"
+                                        )
+                  )#end ggplot
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="colour",labels=leg_labels,values=leg_colours)
+   gg_now = gg_now + scale_colour_manual(name="",aesthetics="fill"  ,labels=leg_labels,values=leg_colours)
+
+   # We only add legend for a single plot.  Patchwork will fix this in the end.
+   gg_now = gg_now + geom_ribbon( aes_string(ymin=h_vqlwr,ymax=h_vqupr)
+                                , alpha       = alpha_ribbon
+                                , show.legend = h_legend
+                                , colour      = "transparent"
+                                )#end geom_ribbon
+   gg_now = gg_now + geom_line( aes_string(y=h_vmean)
+                              , lwd = 0.8
+                              , show.legend = h_legend
+                              )#end geom_line
+
+   
+   # Add local annotation
+   gg_now = gg_now + labs(title=element_blank())
+   gg_now = gg_now + scale_x_continuous( breaks = sequence(12)
+                                       , labels = substring(month.abb,1,1)
+                                       )#end scale_x_continuous
+   gg_now = gg_now + xlab(element_blank())
+   gg_now = gg_now + ylab(desc.unit(desc=h_short,unit=untab[[h_unit]],dxpr=TRUE))
+   gg_now = gg_now + theme_bw( base_size      = gg_ptsz
+                               , base_family    = "Helvetica"
+                               , base_line_size = 0.5
+                               , base_rect_size = 0.5
+                               )#end theme_grey
+
+   # Additional legend settings
+   # if (h_legend) gg_now = gg_now + theme( legend.position = "bottom")
+
+   # Axis settings
+   gg_now = gg_now + theme( axis.text.x       = element_text( size   = gg_ptsz
+                                                            , margin = unit(rep(0.35,times=4),"char")
+                                                            )#end element_text
+                          , axis.text.y       = element_text( size   = gg_ptsz
+                                                            , margin = unit(rep(0.35,times=4),"char")
+                                                            )#end element_text
+                          , axis.ticks.length = unit(-0.2,"char")
+                          , axis.title.y      = element_text( size = gg_ptsz * 0.9)
+                          )#end theme
+
+  # Write plot settings to the list.
+  gg_emean[[h_vnam]] = gg_now
+}#end for (v in seq_along(var_both)){
+
+# Wrap plots then global settings and x axis.
+gg_patch = wrap_plots(gg_emean)
+gg_patch = gg_patch + guide_area() + plot_layout(guides="collect")
+gg_patch = gg_patch + plot_annotation(tag_levels = "a", title = case_desc)
+
+# Save plots.
+for (d in sequence(n_device)){
+   h_output = paste0("comparison_meanseason-",case_name,".",gg_device[d])
+   dummy    = ggsave( filename = h_output
+                    , plot     = gg_patch
+                    , device   = gg_device[d]
+                    , path     = comparison_path
+                    , width    = gg_width
+                    , height   = gg_height
+                    , units    = gg_units
+                    , dpi      = gg_depth
+                    )#end ggsave
+
+}#end for (d in sequence(n_device))
+
+# If sought, plot images on screen
+if (gg_screen) gg_patch
+
+
+```
+
+
+
+```{r,label='test-unit',eval=FALSE, echo=FALSE}
+dim(slice)
+lon = ncvar_get(test,"lon")
+lon = lon-360
+lat=ncvar_get(test,"lat")
+grid <- expand.grid(lon=lon, lat=lat)
+cutpts <- c(-7000, -6000, -4000, -2000, 0, 500, 1000, 1500, 2000, 3000, 4000, 5000)
+lattice::levelplot(slice ~ lon * lat, data=grid, at=cutpts, cuts=11, pretty=TRUE,
+  col.regions=topo.colors(12))
+
+
+
+```
+
